@@ -297,7 +297,7 @@ python tools/seed_demo.py
 python tools/seed_demo.py --reset
 ```
 
-**12 张表**：`users`、`documents`、`document_chunks`、`conversations`、`messages`、`policy_rules`、`match_sessions`、`match_result_items`、`action_plans`、`tasks`、`workflow_runs`、`qa_feedback`，另有 `audit_logs`。字段与索引见 `docs/20-系统设计/数据模型.md`。
+**13 张表**：`users`、`documents`、`document_chunks`、`conversations`、`messages`、`policy_rules`、`match_sessions`、`match_result_items`、`action_plans`、`tasks`、`workflow_runs`、`qa_feedback`，另有 `audit_logs`。字段与索引见 `docs/20-系统设计/数据模型.md`。
 
 | 演示文件 | 类型 | 用途 |
 | --- | --- | --- |
@@ -375,7 +375,7 @@ campus-policy-planner/
 │   ├── plans.py                # 计划草稿 / 确认
 │   ├── tasks.py                # 任务 CRUD 与状态机
 │   ├── workflows.py            # 六节点编排 + run 轨迹
-│   ├── models.py               # SQLAlchemy 模型（12 张表）
+│   ├── models.py               # SQLAlchemy 模型（13 张表）
 │   ├── schemas.py              # pydantic v2 契约
 │   └── llm.py                  # 模型适配器（可降级）
 ├── shared/                     # 纯标准库，前后端共用
@@ -527,15 +527,20 @@ AI 生成的任务可能遗漏或过度解读。让用户先看、先改、再�
 | 文档 | 说明 |
 | --- | --- |
 | `docs/00-合规与提交/比赛合规清单.md` | 赛题规则、6 项提交材料、7 条红线、11 天倒排、提交核对表 |
-| `docs/00-合规与提交/Git提交日志.md` | **提交全量日志**：8 次提交实算统计、粒度自证、提交↔对话映射、M2–M7 提交计划、评审复核命令 |
-| `docs/10-需求分析/PRD.md` | P0/P1/P2、8 条用户故事与可判定验收标准、需求追溯矩阵 |
-| `docs/20-系统设计/系统设计说明书.md` | **主文档**：架构、流程、数据、接口、AI 策略、安全、测试、部署（V1.1） |
-| `docs/20-系统设计/数据模型.md` | 12 张表字段、枚举、状态机、SQLite 约定 |
+| `docs/00-合规与提交/提交材料清单.md` | **6 项材料制作台账**：规格、产出位置、完成判据、截止日、11-18 当天动作序列 |
+| `docs/00-合规与提交/风险登记表.md` | 16 条风险 × 状态 × 复查点、P0 信号监控、状态变更记录 |
+| `docs/00-合规与提交/Git提交日志.md` | **提交全量日志**：实算统计、粒度自证、提交↔对话映射、M2–M7 提交计划、评审复核命令 |
+| `docs/00-合规与提交/M0M1门禁自检报告.md` | M0 三项 + M1 七项逐条实测、6 处缺陷与修复、可复跑脚本 |
+| `docs/10-需求分析/PRD.md` | P0/P1/P2、10 条用户故事与可判定验收标准、需求追溯矩阵（V1.1） |
+| `docs/10-需求分析/用户旅程.md` | 两角色、五道断裂、情绪曲线、三个关键时刻、旅程→功能覆盖检查 |
+| `docs/20-系统设计/系统设计说明书.md` | **主文档**：架构、流程、数据、接口、AI 策略、安全、测试、部署（V1.2） |
+| `docs/20-系统设计/数据模型.md` | 13 张表字段、枚举、状态机、SQLite 约定（V1.1） |
 | `docs/30-接口契约/接口契约统一规范.md` | 外壳、错误码、分页、幂等、鉴权 |
 | `docs/30-接口契约/接口清单.md` | 30 条接口 × 角色 × 里程碑 × 错误码 |
 | `docs/90-AI协作留痕/00-AI对话历史总档.md` | **Prompt 留痕索引**：导出方案、证据台账、三要素检查、功能链补齐门禁 |
 | `docs/90-AI协作留痕/01-需求与架构.md` | 链 A–C：需求与架构、工程惯例迁移、技术栈定版 |
 | `docs/90-AI协作留痕/02-工程质量与故障修复.md` | 链 D–E：文档三类缺陷、Git 推送两个被证伪的假设 |
+| `docs/90-AI协作留痕/03-M0M1收尾与门禁自检.md` | 链 G：按门禁实测补齐产物，含 4 个返工回合 |
 | `docs/90-AI协作留痕/evidence/` | 会话截图与录屏归档（含命名与遮挡规范） |
 | `04-项目实施基本流程与启动检查报告.md` | 工程惯例、7 里程碑、11 天排期、五问答复、决议记录 |
 | `01/02/03-*.md` | 项目介绍、实施框架、分阶段提示词（规划期材料） |
