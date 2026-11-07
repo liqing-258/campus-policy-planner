@@ -1,0 +1,48 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ---------- Node ----------
+node_modules/
+frontend/dist/
+.vite/
+*.local
+
+# ---------- 密钥与本地配置（严禁提交）----------
+.env
+.env.local
+*.pem
+*.key
+
+# ---------- 运行期数据（不入库）----------
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/uploads/
+data/backups/
+logs/
+*.log
+
+# ---------- 工具与 IDE ----------
+.workbuddy/
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---------- 构建产物 ----------
+dist/
+build/
+*.spec
+
+# ---------- 例外：演示数据必须入库 ----------
+!demo/**
+!demo/
