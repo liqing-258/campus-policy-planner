@@ -34,6 +34,8 @@ def app(tmp_path):
         "data_dir": str(tmp_path),
         "jwt_secret": TEST_SECRET,
         "app_env": "test",
+        # 关闭登录限流：几十个用例共享同一个"IP"，否则每条都登录会撞上限流
+        "login_rate_limit_per_minute": 0,
         "llm_api_key": "",
         "llm_model": "",
         "embedding_api_key": "",
