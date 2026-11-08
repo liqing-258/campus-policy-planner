@@ -29,17 +29,24 @@ bp = Blueprint("auth", __name__)
 
 # ---------- 简易登录限流（进程内，单实例足够；多实例需换 Redis）----------
 _LOGIN_WINDOW_SECONDS = 60
-_LOGIN_MAX_ATTEMPTS = 20
 _login_attempts: dict[str, list[float]] = {}
 
 
 def _rate_limit_login(ip: str) -> None:
+    limit = current_settings().login_rate_limit_per_minute
+    if limit <= 0:
+        return  # 测试或压测环境显式关闭
     now = time.monotonic()
     bucket = [t for t in _login_attempts.get(ip, []) if now - t < _LOGIN_WINDOW_SECONDS]
-    if len(bucket) >= _LOGIN_MAX_ATTEMPTS:
+    if len(bucket) >= limit:
         raise InvalidParam("登录尝试过于频繁，请稍后再试")
     bucket.append(now)
     _login_attempts[ip] = bucket
+
+
+def reset_login_attempts() -> None:
+    """测试与运维用：清空计数器（正常业务不需要调用）。"""
+    _login_attempts.clear()
 
 
 def hash_password(plain: str) -> str:
