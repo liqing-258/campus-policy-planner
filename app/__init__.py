@@ -36,6 +36,10 @@ def create_app(overrides: dict | None = None) -> Flask:
     app.json.sort_keys = False
 
     app.extensions["settings"] = settings
+    # 每个 app 实例独立一份 BM25 索引（测试隔离；生产单进程共用一个）
+    from app.indexing import EXTENSION_KEY, Bm25Index
+
+    app.extensions[EXTENSION_KEY] = Bm25Index()
 
     _configure_logging(app, settings)
     settings.ensure_dirs()
@@ -45,10 +49,12 @@ def create_app(overrides: dict | None = None) -> Flask:
 
     # ---- 蓝图 ----
     from app import auth as auth_mod
+    from app import documents as documents_mod
     from app import health as health_mod
 
     app.register_blueprint(health_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(auth_mod.bp, url_prefix=API_PREFIX)
+    app.register_blueprint(documents_mod.bp, url_prefix=API_PREFIX)
 
     _register_root_route(app)
 

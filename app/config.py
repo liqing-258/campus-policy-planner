@@ -67,7 +67,7 @@ class Settings:
         self.host = _str("HOST", "127.0.0.1")
         self.port = _int("PORT", 5000)
         # 版本号随里程碑前进：M2 = 0.2.0，M3 = 0.3.0，以此类推
-        self.version = _str("APP_VERSION", "0.2.0")
+        self.version = _str("APP_VERSION", "0.3.0")
 
         # --- 数据库 ---
         self.database_url = _str("DATABASE_URL", "sqlite:///./data/app.db")
@@ -98,7 +98,13 @@ class Settings:
 
         # --- 检索与切分 ---
         self.rag_top_k = _int("RAG_TOP_K", 6)
+        # 拒答阈值。注意：M3 实测证明**原始 BM25 分数不可用作阈值**（无关查询可能比相关查询分更高，
+        # 见 app/indexing.py:search 文档串与 tests/test_indexing.py），因此 M4 里这一项只会比对
+        # "归一化后的分数"，不直接作用于原始 BM25 分。
         self.rag_min_score = _float("RAG_MIN_SCORE", 0.35)
+        # 检索粗筛：命中的查询词项占比低于此值视为"主题不相关"，直接不进 LLM。
+        # 0.6 是 3 片段 toy 语料上观察到的分界（相关≥0.67 / 无关≤0.5），**未经评测集校准**，M4 必须重新定标。
+        self.rag_min_coverage = _float("RAG_MIN_COVERAGE", 0.6)
         self.chunk_size = _int("CHUNK_SIZE", 600)
         self.chunk_overlap = _int("CHUNK_OVERLAP", 80)
         # 有效文本阈值：低于此字符数判 empty（系统设计说明书 §4.2）
@@ -108,6 +114,9 @@ class Settings:
 
         # --- 其它 ---
         self.rate_limit_per_minute = _int("RATE_LIMIT_PER_MINUTE", 20)
+        # 登录尝试上限（进程内计数）。设为 0 或负数即关闭——测试里这么用，
+        # 否则几十个用例共用同一个"IP"，会把限流当成 bug 查
+        self.login_rate_limit_per_minute = _int("LOGIN_RATE_LIMIT_PER_MINUTE", 20)
         self.demo_banner = _bool("DEMO_BANNER", True)
 
         if overrides:
