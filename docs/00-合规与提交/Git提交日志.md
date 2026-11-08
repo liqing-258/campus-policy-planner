@@ -2,7 +2,7 @@
 
 > 项目：知校 · 校园政策智能理解与事务规划系统
 > 对应赛事材料：《提交材料清单》§2.1 代码仓库与演进记录
-> 文档版本：V1.1 ｜ 首次生成 2026-11-07 18:10 ｜ 本次刷新 2026-11-07 19:0x ｜ 覆盖范围：M0 + M1 全部提交（20 次）
+> 文档版本：V1.3 ｜ 首次生成 2026-11-07 18:10 ｜ 本次刷新 2026-11-08（M3 结项） ｜ 覆盖范围：M0 + M1 + M2 + M3 全部提交（44 次）
 > **数据来源**：本文所有数字由 `git log --numstat` 实算得出，非手工填写。复核命令见 §10。
 
 ---
@@ -31,10 +31,10 @@
 | 克隆地址 | `https://github.com/liqing-258/campus-policy-planner.git` | `git clone` |
 | 可见性 | **Public** | 未登录 `curl` 返回 `repo_http=200`（2026-11-07 18:10 实测） |
 | 默认分支 | `main` | `git branch -r` |
-| 当前 HEAD（本次刷新时） | `10b1eb8` | `git rev-parse HEAD`。刷新后还会前移一次（本文自身提交），复核时以实查为准 |
+| 当前 HEAD（本次刷新时） | `050c5c0`（M3 代码与文档批次末位） | `git rev-parse HEAD`。刷新后还会前移 2 次（V1.3 设计回灌 + 本文自身），复核时以实查为准 |
 | 基线提交总数 | 8（锚点 `541cd56`） | `git rev-list --count 541cd56`（**固定指向该提交**，不随新提交变化） |
-| 当前提交总数 | 20（本文提交前）→ 21（本文提交后） | `git rev-list --count HEAD` |
-| 跟踪文件数 | 24 | `git ls-files \| wc -l`（本批未新增待跟踪文件） |
+| 当前提交总数 | 44（本文提交前）→ **46**（含 V1.3 回灌与本文提交） | `git rev-list --count HEAD` |
+| 跟踪文件数 | 85 | `git ls-files \| wc -l` |
 | 敏感文件 | 无。`.env` 未跟踪，`.git/` 内无令牌 | `git ls-files --error-unmatch .env` 报错即通过；`grep -rl "ghp_" .git/` 无命中 |
 
 > **对评审的访问说明**：仓库为 Public，无需邀请协作者即可克隆、查看全部历史与 `docs/` 下全部留痕。若组委会要求「提供评审访问权限」，本仓库已满足「Public」这一选项，无需额外操作。
@@ -122,26 +122,51 @@
 
 ---
 
-## 4.2 M1 收尾追加提交（门禁自检驱动）
+## 4.2 M1 收尾追加提交（留痕体系 + 门禁自检驱动）
 
-按 §4 的维护约定，基线 8 条不改写，新增批次另起一表。
+按 §4 的维护约定，基线 8 条不改写，新增批次另起一表。本批共 **14 次（提交 9–22）**，分三组：
 
 | # | 短哈希 | type(scope) | 摘要 | 文件 | +/− |
 | --- | --- | --- | --- | --- | --- |
-| 9 | `0ea814e` | docs(prd) | add US-09/US-10 to close P0 acceptance gaps | 1 | +11/−6 |
-| 10 | `e159a16` | docs(design) | fix table count to 13 and add missing indexes | 1 | +43/−8 |
-| 11 | `79646b3` | docs(compliance) | add submission checklist and risk register for M0 | 2 | +237/−0 |
-| 12 | `c87ec42` | docs(prd) | add user journey for M1 design freeze | 1 | +134/−0 |
-| 13 | `4b06d32` | docs(design) | bump spec to v1.2 with FR-F mapping and risk alignment | 1 | +53/−3 |
-| 14 | `5d63e63` | docs(compliance) | add M0/M1 gate self-check report and refresh task status | 2 | +188/−10 |
-| 15 | `5020b79` | docs(ai-log) | register chain G for M0/M1 closeout and gate check | 3 | +102/−5 |
-| 16 | `10b1eb8` | docs(readme) | add four new M0/M1 deliverables to documentation index | 1 | +11/−6 |
+| 9 | `4888fab` | docs(ai-log) | add prompt history index with evidence ledger and gap gates | 3 | +252/−1 |
+| 10 | `04684f2` | docs(ai-log) | record two engineering failure chains with falsified hypotheses | 1 | +175/−0 |
+| 11 | `eb5b2da` | docs(compliance) | add git commit log with granularity proof and dialogue matrix | 2 | +320/−4 |
+| 12 | `d04bff6` | docs(readme) | link prompt index and commit log in documentation map | 1 | +8/−3 |
+| 13 | `0ea814e` | docs(prd) | add US-09/US-10 to close P0 acceptance gaps | 1 | +11/−6 |
+| 14 | `e159a16` | docs(design) | fix table count to 13 and add missing indexes | 1 | +43/−8 |
+| 15 | `79646b3` | docs(compliance) | add submission checklist and risk register for M0 | 2 | +237/−0 |
+| 16 | `c87ec42` | docs(prd) | add user journey for M1 design freeze | 1 | +134/−0 |
+| 17 | `4b06d32` | docs(design) | bump spec to v1.2 with FR-F mapping and risk alignment | 1 | +53/−3 |
+| 18 | `5d63e63` | docs(compliance) | add M0/M1 gate self-check report and refresh task status | 2 | +188/−10 |
+| 19 | `5020b79` | docs(ai-log) | register chain G for M0/M1 closeout and gate check | 3 | +102/−5 |
+| 20 | `10b1eb8` | docs(readme) | add four new M0/M1 deliverables to documentation index | 1 | +11/−6 |
+| 21 | `7ad42b7` | docs(ai-log) | backfill chain G commits and refresh git log for M1 closeout | 2 | +63/−19 |
+| 22 | `cd287f7` | docs(prd) | drop colon from journey title to avoid mermaid parse ambiguity | 1 | +1/−1 |
 
-**本批合计**：8 次提交 ｜ 12 次文件变更 ｜ +779/−38 行 ｜ 单次 1–3 文件
+**本批合计**：14 次提交 ｜ 22 次文件变更 ｜ +1598/−66 行 ｜ 单次 1–3 文件
 
-### 4.2.1 为什么这批提交值得单独看
+分组说明：
 
-这 8 次提交不是"又写了几份文档"，而是**同一份文档被门禁打回了 6 次**：
+| 组 | 提交 | 干了什么 |
+| --- | --- | --- |
+| 留痕体系成型 | 9–12 | 建立 Prompt 索引与证据台账、写入链 D/E 的两次真实故障、**创建本文件**、在 README 挂上文档地图 |
+| 门禁打回 | 13–20 | 同一批文档被自己的门禁打回 6 次，逐次修复（详见 §4.2.1） |
+| 回填与修正 | 21–22 | 回填链 G 的 commit 哈希（自指问题第二次出现）；修 Mermaid 标题里的冒号 |
+
+### 4.2.0 一处漏登，在这里补上
+
+M2 收尾整理本文件时，只把提交 13–20 录成了"9–16"，**漏掉了提交 9–12 与 21–22 共 6 次**。结果 §4.3 的编号从"17"起，与真实的第 23 次提交对不上。
+
+发现方式：M3 写 §4.4 时按 `git log --reverse | cat -n` 逐条对齐，发现编号断层。
+处理方式：**在原位补登并改正编号**，同时修正 §4.3 / §4.4 的编号（23–32 / 35–44），不做其他改写。
+
+> 这条记下来的价值不在于"补了 6 行表格"，而在于它暴露了一个反复出现的模式：
+> **凡是靠人工维护的编号，早晚会错位。** 所以 §10 的复核指南里，"用 `git log --reverse | cat -n` 核对编号"被列为必查项，
+> 而不是信任本文件里的数字。
+
+### 4.2.1 为什么"门禁打回"这 8 次提交值得单独看
+
+它们不是"又写了几份文档"，而是**同一份文档被门禁打回了 6 次**：
 
 | 提交 | 触发的门禁 | 打回了什么 |
 | --- | --- | --- |
@@ -160,18 +185,20 @@ M2 是本仓库**第一次出现 `app/` 与 `frontend/` 代码**。10 次提交�
 
 | # | 短哈希 | type(scope) | 摘要 | 文件 | +/− |
 | --- | --- | --- | --- | --- | --- |
-| 17 | `e088ca0` | chore(deps) | add pinned requirements and shared enum/code constants | 4 | +201/−0 |
-| 18 | `560ab50` | feat(core) | add config loader, error codes and unified response envelope | 5 | +544/−0 |
-| 19 | `c6c3741` | feat(db) | add thirteen orm models with sqlite wal and foreign-key pragmas | 1 | +355/−0 |
-| 20 | `b8db6e5` | feat(core) | wire app factory with health and jwt auth blueprints | 3 | +300/−0 |
-| 21 | `4ec86d8` | feat(db) | add create-tables and demo-seed scripts with pragma assertions | 2 | +145/−0 |
-| 22 | `b212282` | test | cover envelope, auth, health and secret scan for m2 gate | 6 | +438/−0 |
-| 23 | `f2c4624` | feat(ui) | add vue3 skeleton with login view, guard and degraded banner | 14 | +2393/−0 |
-| 24 | `e4cc602` | chore(scripts) | add setup/start scripts, env selfcheck and route dump | 8 | +330/−0 |
-| 25 | `9062ae3` | docs(runbook) | add verified run instructions and refresh readme for m2 | 2 | +435/−103 |
-| 26 | `7207aa3` | feat(core) | add waitress entrypoint with host and port overrides | 1 | +42/−0 |
+| 23 | `e088ca0` | chore(deps) | add pinned requirements and shared enum/code constants | 4 | +201/−0 |
+| 24 | `560ab50` | feat(core) | add config loader, error codes and unified response envelope | 5 | +544/−0 |
+| 25 | `c6c3741` | feat(db) | add thirteen orm models with sqlite wal and foreign-key pragmas | 1 | +355/−0 |
+| 26 | `b8db6e5` | feat(core) | wire app factory with health and jwt auth blueprints | 3 | +300/−0 |
+| 27 | `4ec86d8` | feat(db) | add create-tables and demo-seed scripts with pragma assertions | 2 | +145/−0 |
+| 28 | `b212282` | test | cover envelope, auth, health and secret scan for m2 gate | 6 | +438/−0 |
+| 29 | `f2c4624` | feat(ui) | add vue3 skeleton with login view, guard and degraded banner | 14 | +2393/−0 |
+| 30 | `e4cc602` | chore(scripts) | add setup/start scripts, env selfcheck and route dump | 8 | +330/−0 |
+| 31 | `9062ae3` | docs(runbook) | add verified run instructions and refresh readme for m2 | 2 | +435/−103 |
+| 32 | `7207aa3` | feat(core) | add waitress entrypoint with host and port overrides | 1 | +42/−0 |
 
 **本批合计**：10 次提交 ｜ 46 次文件变更 ｜ +5183/−103 行 ｜ 单次 1–14 文件（均值 4.6）
+
+> 之后两次提交（`cc2b21c` 链 H 留痕、`378adaa` 提交日志补录）是 M2 的文档收尾，共 3 次文件变更，不计入代码批次。
 
 ### 4.3.1 一次必须承认的粒度越界
 
@@ -186,23 +213,23 @@ M2 是本仓库**第一次出现 `app/` 与 `frontend/` 代码**。10 次提交�
 
 扣除 `package-lock.json` 后为 13 个文件——仍超限。这里不找借口：**前端骨架本应拆成"脚手架配置"与"页面实现"两次提交**，是本次执行时图省事合并了，M3 起不再这样。
 
-### 4.3.2 提交 17–19 之后代码还不能运行，这是有意的
+### 4.3.2 提交 23–25 之后代码还不能运行，这是有意的
 
 按依赖顺序切分必然出现"中间态不可运行"：
 
 | 提交后 | 能否 `python server.py` | 原因 |
 | --- | --- | --- |
-| 17 | ❌ | 无 `app/` 包 |
-| 18 | ❌ | 无应用工厂，且 `contract.py` 依赖的 models 尚未存在 |
-| 19 | ❌ | 有模型但无工厂、无蓝图 |
-| **20** | **✅** | 工厂 + health + auth 蓝图接通，`/health` 可访问 |
-| 21–26 | ✅ | 每步增量都可运行 |
+| 23 | ❌ | 无 `app/` 包 |
+| 24 | ❌ | 无应用工厂，且 `contract.py` 依赖的 models 尚未存在 |
+| 25 | ❌ | 有模型但无工厂、无蓝图 |
+| **26** | **✅** | 工厂 + health + auth 蓝图接通，`/health` 可访问 |
+| 27–32 | ✅ | 每步增量都可运行 |
 
 另一种做法是"为了每步都能跑而合并成 2–3 个大提交"，但那会让单次 diff 涨到 800 行以上，违反"可单独审阅"。这里选择**可审阅性优先**，并把不可运行的区间明确标出来，而不是含糊带过。
 
 ### 4.3.3 本批次还违反了 §9.2 的第 1 条
 
-§9.2 写的是"**先红后绿**：先提交失败的测试，再提交实现"。M2 实际做的是**先写实现、后补测试**（提交 22 才引入 `tests/`）。
+§9.2 写的是"**先红后绿**：先提交失败的测试，再提交实现"。M2 实际做的是**先写实现、后补测试**（提交 28 才引入 `tests/`）。
 
 原因不是忘了，而是当时判断"契约外壳尚未定型，先写测试会反复改断言"。但这个理由站不住——`test_envelope_key_order_and_types` 这类断言恰恰在定型前写才最有价值（H.4.4 的键序问题就是靠它才没漏到线上）。
 
@@ -210,19 +237,107 @@ M2 是本仓库**第一次出现 `app/` 与 `frontend/` 代码**。10 次提交�
 
 ---
 
+## 4.4 M3 追加提交（第一次真正遵守"先红后绿"）
+
+M3 是本仓库**第一次让测试先于实现进入历史**。10 次提交，全部 ≤6 个文件，无一越界。
+
+| # | 短哈希 | type(scope) | 摘要 | 文件 | +/− |
+| --- | --- | --- | --- | --- | --- |
+| 35 | `b09bd4f` | test(docs) | add m3 acceptance cases for ingest, guard and bm25 index | 3 | +431/−0 |
+| 36 | `064b60c` | feat(parse) | extract text from pdf/docx/txt with magic check and scanned hint | 2 | +297/−2 |
+| 37 | `668ee22` | feat(index) | add structure-aware chunking and bm25 with query coverage | 2 | +475/−0 |
+| 38 | `d49dba3` | chore(demo) | ship five fictional sample files with generator script | 6 | +213/−0 |
+| 39 | `1ecd3c2` | feat(api) | expose document ingest routes and bump to 0.3.0 | 4 | +481/−1 |
+| 40 | `cb0a67b` | fix(auth) | read login rate limit from settings and expose reset helper | 1 | +9/−2 |
+| 41 | `0f43297` | chore(tools) | add index rebuild probe and end-to-end gate runner | 2 | +260/−0 |
+| 42 | `b4297ab` | docs(readme) | refresh status, quickstart and endpoints for m3 | 1 | +149/−62 |
+| 43 | `bb29b89` | docs(delivery) | record m3 measured outputs and three contract deviations | 2 | +233/−20 |
+| 44 | `050c5c0` | docs(ai-log) | record chain i for m3 with the bm25 score reversal | 2 | +362/−3 |
+
+**本批合计**：10 次提交 ｜ 25 次文件变更 ｜ +2910/−90 行 ｜ 单次 1–6 文件（均值 2.5）
+
+### 4.4.1 "先红后绿"这次是真的，而且验过
+
+提交 35 只包含 `tests/test_documents.py`、`tests/test_indexing.py` 与 `tests/conftest.py`，**不含任何实现**。
+为确认它确实是红的（而不是"看起来应该红"），把该提交单独检出到一个临时工作树里跑了一遍：
+
+```
+$ git worktree add --detach /tmp/m3red b09bd4f
+$ cd /tmp/m3red && python -m pytest -q
+tests\test_indexing.py:10: in <module>
+    from app.indexing import Bm25Index, tokenize
+E   ModuleNotFoundError: No module named 'app.indexing'
+!!! Interrupted: 1 error during collection !!!
+```
+
+随后在提交 40（实现补齐后的状态）上再验一次：
+
+```
+$ git worktree add --detach /tmp/m3green cb0a67b
+$ cd /tmp/m3green && python -m pytest
+66 passed, 1 warning in 104.83s
+```
+
+两次验证用的是同一份 `.venv`、同一条命令，差别只有提交点——**这才是"先红后绿"的证据，而不是一句声明**。
+
+> 一个细节：绿的那次跑了 104.83 s，主仓库里同样的 66 项只要 26.50 s。差值几乎全部来自 jieba 在新工作树里**重新构建词典缓存**。
+> 这也顺带印证了 §4.8 那条"构建耗时 301 ms 主要是首次加载词典"的判断。
+
+### 4.4.2 提交 35–38 之间代码仍然不能跑
+
+和 §4.3.2 同一种情况，按依赖顺序切分必然有中间态：
+
+| 提交后 | 能否 `python server.py` 并上传文件 | 原因 |
+| --- | --- | --- |
+| 35 | ❌ | 只有测试，无 `app/indexing.py`，pytest 直接 collection error |
+| 36 | ❌ | 有解析器，但没有路由暴露 |
+| 37 | ❌ | 有切分与索引，仍无路由 |
+| 38 | ❌ | 有演示文件，仍无路由 |
+| **39** | **✅** | `documents` 蓝图注册，7 条路由可达 |
+| 40 | ✅ | 修掉限流配置项依赖，测试才真正全绿 |
+
+这次没有把"能跑"提前——**提交 39 之后能起服务并上传，但测试还是红的**（限流撞车），到 40 才绿。
+顺序上宁可多一次提交，也不合并成"一次改 5 个文件、既加功能又修 bug"。
+
+### 4.4.3 一处需要说明的返工：`app/auth.py` 漏提交
+
+提交 39 已经把 `app/config.py` 的 `login_rate_limit_per_minute` 提交了，但真正读这个配置的 `app/auth.py` 改动**忘了加进暂存区**。
+表现是：提交 39 之后 `config` 里的新字段是个没人读的死配置，而测试仍会撞 20 次/分钟的登录限流。
+
+发现方式：提交前跑 `git status --short`，看到 `M app/auth.py` 还挂在工作区。处理方式是**补一个独立提交（40）**，不是 `--amend`。
+
+> 为什么不 `--amend`：改写已存在的提交会改变其哈希，让本文档里已经写下的 `1ecd3c2` 失效，
+> 也让评审看到的演进过程与真实操作不符。**多一次提交的代价，远小于一串对不上的哈希。**
+
+---
+
 ## 5. 提交粒度自证
 
 ### 5.1 量化指标
 
-| 指标 | 实测值 | 说明 |
+| 指标 | 实测值 | 复现命令 |
 | --- | --- | --- |
-| 提交总数 | **32**（M0+M1 共 22 + M2 共 10） | 覆盖 M0 – M2，历时 2 个工作日 |
-| 单提交文件数 | 最小 1 / 最大 14 / 均值 **2.62** | 唯一越界为 `f2c4624`（前端骨架），原因见 §4.3.1 |
-| 累计文件变更 | 84 次 ｜ +12821 / −171 行 | 其中 2014 行为首次导入的赛前规划文档，见 §5.2 |
-| 文档类单提交新增行 | 中位数约 100 行 | M2 起出现代码提交，最大单次为 `f2c4624`（含 1506 行锁文件） |
-| 无功能代码提交 | 22 / 32（M0+M1 阶段） | `app/` 与 `frontend/` 自提交 17 起出现 |
-| 提交信息可读性 | 32 / 32 符合 `type(scope): subject` | `git log --oneline` 可直接核 |
-| 跟踪文件总数 | **69** | `git ls-files \| wc -l`（含 M2 的代码与测试） |
+| 提交总数 | **44**（量测点 `050c5c0`）→ **46**（含 V1.3 回灌与本文提交） | `git rev-list --count HEAD` |
+| 跟踪文件总数 | **85**（量测点同上；随后两次文档提交未新增文件） | `git ls-files \| wc -l` |
+| 单提交文件数 | 最小 1 / 最大 14 / 均值 **2.55** | `git log --format="" --name-only \| grep -c .` → 112 次；112 ÷ 44 |
+| 累计文件变更次数 | **112**（量测点 `050c5c0`；含本文与其前一提交为 115） | 同上。M3 的 10 次提交占 25 次 |
+| 累计增删行 | **+15984 / −270**（量测点 `050c5c0`） | `git log --shortstat \| awk` 累加（含二进制文件的提交不计行数） |
+| 净变更（首提交 → HEAD） | 81 文件 / **+13700 / −0**（量测点 `050c5c0`） | `git diff --shortstat <首提交> HEAD` |
+| 粒度越界次数 | **1**（M2 的 `f2c4624`，14 文件） | 见 §4.3.1；M3 的 10 次全部 ≤6 |
+| 提交信息合规率 | 44 / 44 符合 `type(scope): subject` | `git log --oneline` 可直接核 |
+| 红→绿可验证批次 | M3（提交 27 红 → 32 绿，两次独立工作树实测） | 见 §4.4.1 |
+
+> **量测点说明**：本文自身也在版本库里，指标一旦写死就会与提交动作互相追赶。
+> 因此上表统一锚定在 `050c5c0`（M3 代码与文档批次末位）量测，并标出本文提交后的增量。
+> 复核时用最后一列命令实查，与表内数字对不上才是问题——若只差"本文与其前一提交"的 3 次文件变更、约 300 行增删，属正常。
+
+> **一处口径说明**：「累计增删行」与「净变更」两个数不一样，且后者删除行为 0，这不是笔误。
+> - 前者是**逐次提交的增删累加**：同一行被改两次就算两次增删；
+> - 后者是**首末快照对比**：第一次提交只有 5 个文件（`.gitignore`、`.env.example` 与三份赛前规划文档），
+>   这 5 个文件此后从未被删过行；README、docs、app、tests 全部是后来**新增**的文件，
+>   它们内部的改写不会体现为"首末对比"里的删除。
+>
+> 用哪个数取决于要证明什么：证明"每次提交都不大"看前者，证明"仓库净规模"看后者。
 
 ### 5.2 首次提交 2014 行，为什么**不**构成"initial commit 包含全部功能"
 
@@ -252,6 +367,10 @@ M2 是本仓库**第一次出现 `app/` 与 `frontend/` 代码**。10 次提交�
 
 > 我选择把这条写出来，而不是靠时间戳看不出问题就略过。赛事的评分项是"过程真实透明"，隐瞒比缺陷更致命。
 
+> **M3 兑现情况**：上面第 1 条（`test` + `feat` 拆两次）已执行并在 §4.4.1 用两次工作树实测验证；
+> 第 2 条（时间分散）部分兑现——M3 的 10 次提交仍集中在同一个工作日下午，原因是本地开发与提交在同一会话完成，
+> **这一条到 M7 前都不打算靠"隔天再提交"去凑**，因为那是表演而非改进。
+
 ---
 
 ## 6. 提交 ↔ AI 对话 映射矩阵
@@ -269,8 +388,15 @@ M2 是本仓库**第一次出现 `app/` 与 `frontend/` 代码**。10 次提交�
 | 7 | `c25d8b9` | 链 B | `01-需求与架构.md` 条目 2 | README 升 V1.1，11 天排期与硬分界写入 |
 | 8 | `541cd56` | 链 E（Git 推送故障修复） | `02-工程质量与故障修复.md` 链 E | 修复凭据弹窗挂起 + refs 写入失败，逐 blob 校验推送完整性 |
 | 9–16 | `0ea814e`…`10b1eb8` | 链 G（M0/M1 收尾与门禁） | `03-M0M1收尾与门禁自检.md` 链 G | 门禁实测打回 6 处缺陷、补齐 3 项缺失产物（提交清单/风险登记/用户旅程） |
+| 17–26 | `e088ca0`…`7207aa3` | 链 H（M2 工程骨架） | `04-M2工程骨架.md` 链 H | 把冻结设计变成可运行命令链；修掉 7 个真实缺陷（语法错误 import、错误码被子类继承吃掉、键序被排序、Vite 只绑 IPv6 等） |
+| 27 | `b09bd4f` | 链 I（M3 知识库） | `05-M3知识库可用.md` 链 I | 先写验收用例，**实测确认为红**（`ModuleNotFoundError: app.indexing`） |
+| 28–29 | `064b60c`、`668ee22` | 链 I | 同上 §I.4.3–I.4.5 | 修标题识别过宽（949 字 → 33 碎片）、DOCX 切碎、`min_section_chars` 合并过头 |
+| 30 | `d49dba3` | 链 I | 同上 §I.4.7 | 演示扫描件从 4.18 MB 压到 17.8 KB |
+| 31–32 | `1ecd3c2`、`cb0a67b` | 链 I | 同上 §I.4.1、I.4.6 | 修 `NameError` 导致全量解析失败；状态机白名单放行 `parsed/chunked → parsing` |
+| 33 | `0f43297` | 链 I | 同上 §I.5 | 索引无接口可看，改为用脚本 + 端到端两条路径证明；并因实测推翻"加分数阈值"方案 |
+| 34–36 | `b4297ab`…`050c5c0` | 链 I + 本项目文档纪律 | 同上 §I.5.5、`接口清单.md` §6 | 结项文档同步，登记 3 处契约偏差，不回头改冻结版本 |
 
-> 其中链 D、链 E 是**同一会话内的真实故障修复过程**，含失败现象、错误假设、被证伪的方案和最终验证，是"如何引导 AI 修 Bug"的直接证据。链 G 则是**门禁打回文档**的过程——同一批文档被自己的规则打回 6 次，每次打回都对应一个可审阅的独立提交。
+> 其中链 D、链 E 是**同一会话内的真实故障修复过程**，含失败现象、错误假设、被证伪的方案和最终验证，是"如何引导 AI 修 Bug"的直接证据。链 G 则是**门禁打回文档**的过程——同一批文档被自己的规则打回 6 次，每次打回都对应一个可审阅的独立提交。链 I 的 §I.5 是目前**唯一一处"AI 的方案被实测否掉、最终改设计而不是改测试口径"**的记录。
 
 ---
 
@@ -292,8 +418,22 @@ flowchart LR
     subgraph D3["11-07 18:05 · 自指回填"]
         C8["541cd56<br/>补哈希"]
     end
+    subgraph D4["11-08 · M2 工程可跑（10 次）"]
+        C17["e088ca0…7207aa3<br/>app/ + frontend/ 骨架"]
+    end
+    subgraph D5["11-08 · M3 知识库可用（10 次）"]
+        C27["b09bd4f<br/>test（红）"]
+        C28["064b60c…1ecd3c2<br/>parse/index/api"]
+        C32["cb0a67b<br/>fix auth（绿）"]
+        C34["b4297ab…050c5c0<br/>docs 结项"]
+    end
     C1 --> C2 --> C3 --> C4 --> C5 --> C6 --> C7 --> C8
+    C8 --> C17 --> C27
+    C27 --> C28 --> C32 --> C34
 ```
+
+> M2 与 M3 各 10 次提交，节点做了合并显示（`git log --oneline` 可看到全部 44 次）。
+> M3 的 `b09bd4f → cb0a67b` 是本项目第一段**可验证的红 → 绿**区间，见 §4.4.1。
 
 ---
 
@@ -320,23 +460,27 @@ flowchart LR
 
 与 `04-项目实施基本流程与启动检查报告.md` §2.3 的逐阶段估算保持一致（同一套数字，避免两处打架）：
 
-| 里程碑 | 日期 | 主要内容 | 预计提交数 | type 分布 |
-| --- | --- | --- | --- | --- |
-| M0 | 11-08 上午 | 仓库与合规基线 | 2–3 | chore / docs |
-| M1 | 11-08 | 设计冻结（PRD / 数据模型 / 契约 / 留痕） | 2–4 | docs |
-| M2 | 11-08 | 工程骨架、配置、DB、JWT 登录、健康检查 | 4–6（**实际 10**） | feat / fix / test |
-| M3 | 11-10 | 文档上传、解析、切分、索引 | 4–6 | feat / fix / test |
-| M4 | 11-11 | 混合检索、结构化问答、引用校验、拒答 | 5–7 | feat / fix / test |
-| M5 | 11-12～13 | 规则抽取、三态匹配、计划、任务 | 8–10 | feat / fix / test |
-| M6 | 11-14～16 | 前端串联、节点可视化、体验与安全自查 | 8–12 | feat / fix |
-| M7 | 11-17～18 | README 复现、技术文档、视频 | 4–6 | docs / chore |
-| **合计** | — | — | **37–54**（节奏参考值，非硬指标） | 与合规清单 S-2 口径一致 |
+| 里程碑 | 日期 | 主要内容 | 预计提交数 | 实际 | type 分布 |
+| --- | --- | --- | --- | --- | --- |
+| M0 | 11-07 | 仓库与合规基线（提交 1–2） | 2–3 | **2** | chore / docs |
+| M1 | 11-07 | 设计冻结（PRD / 数据模型 / 契约 / 留痕，提交 3–8） | 2–4 | **6** | docs |
+| M1 收尾 | 11-07 | 留痕体系 + 门禁打回 6 次 + 哈希回填（提交 9–22） | 未预估 | **14** | docs |
+| M2 | 11-08 | 工程骨架、配置、DB、JWT 登录、健康检查（提交 23–32） | 4–6 | **10** | feat / fix / test |
+| M2 收尾 | 11-08 | 链 H 留痕 + 提交日志补录（提交 33–34） | — | **2** | docs |
+| M3 | 11-08 | 文档上传、解析、切分、索引（提交 35–44） | 4–6 | **10** | feat / fix / test / chore / docs |
+| M4 | 11-11 | 混合检索、结构化问答、引用校验、拒答 | 5–7 | — | feat / fix / test |
+| M5 | 11-12～13 | 规则抽取、三态匹配、计划、任务 | 8–10 | — | feat / fix / test |
+| M6 | 11-14～16 | 前端串联、节点可视化、体验与安全自查 | 8–12 | — | feat / fix |
+| M7 | 11-17～18 | README 复现、技术文档、视频 | 4–6 | — | docs / chore |
+| **合计** | — | — | **37–54**（节奏参考值，非硬指标） | **已 44** | 与合规清单 S-2 口径一致 |
 
-> **估算偏差必须自己说出来**：M0 + M1 原估 **4–7 次**提交，实际做了 **20 次**（超出 13 次）。原因有两个，都不是"多做了无用功"：
+> **估算偏差必须自己说出来**：M0 + M1 原估 **4–7 次**提交，实际做了 **22 次**（超出 15 次以上，因为原估算里根本没有"门禁打回"这一项）。原因有两个，都不是"多做了无用功"：
 > 1. **文档量被低估**：M0/M1 实际产出 14 份文档（合规、清单、风险、PRD、旅程、数据模型、契约两份、留痕四份、门禁报告），原估只算了 5–6 份；
 > 2. **门禁打回**：门禁自检发现 6 处缺陷，每处按"一个意图一次提交"独立修复，又产生 8 次。
 >
-> 结论：**M2–M7 的 37–54 是节奏参考，不是承诺**。若 M2 起每次提交都按"先 test 后 feat"拆，实际数只会更多不会更少——这对评分是好事（细粒度），但对工期是压力。11-13 硬分界不变。
+> M2、M3 各 10 次，同样超出"4–6"的估算，原因一致：按 §9.2 的"先红后绿"拆，测试与实现天然要分两次提交。
+>
+> 结论：**M2–M7 的 37–54 是节奏参考，不是承诺**。按当前实际速率（M2+M3 = 20 次，另加收尾 4 次），全程落在 60 次上下——这对评分是好事（细粒度可审阅），但对工期是压力。11-13 硬分界不变。
 
 ### 9.2 M2 起的提交节奏（硬约束）
 
@@ -358,13 +502,14 @@ git log -1 --format=%B        # 提交信息是否符合 type(scope): subject
 
 | # | 命令 | 看什么 | 期望结果 |
 | --- | --- | --- | --- |
-| 1 | `git log --oneline --graph --all` | 历史是否线性、是否细粒度 | 8 条以上，无单条巨型提交 |
-| 2 | `git log --numstat --reverse` | 每次提交的增删规模 | 与 §4 表格数字一致 |
-| 3 | `git ls-files \| grep -c "^app/"` | 是否"首次提交即含全部功能" | 当前为 0（设计阶段）；M2 起递增 |
-| 4 | 逐 blob sha 比对（API `git/trees?recursive=1` vs `git ls-tree -r HEAD`） | 远程与本地是否一致 | 完全一致，无缺失文件 |
-| 5 | `git log --format="%h %s" \| grep -cE "^(feat\|fix\|test)"` | 功能提交占比（M2 后） | 逐阶段上升，最终 ≥ 50% |
-| 6 | `grep -rl "ghp_" .git/ \|\| echo clean` | 令牌是否泄露进仓库 | 输出 `clean` |
-| 7 | `git ls-files --error-unmatch .env` | `.env` 是否误入库 | 报错（未跟踪）即通过 |
+| 1 | `git log --oneline --graph --all` | 历史是否线性、是否细粒度 | **44 条**，线性无 merge，无单条巨型提交 |
+| 2 | `git log --numstat --reverse` | 每次提交的增删规模 | 与 §4 / §4.2 / §4.3 / §4.4 各表数字一致 |
+| 3 | `git log --format="%h %s" --reverse \| cat -n` | **本文件的提交编号是否与真实顺序一致** | 最后一条编号 = 44；M3 从 35 起（§4.2.0 记过一次错位） |
+| 4 | `git ls-files \| grep -c "^app/"` | 是否"首次提交即含全部功能" | M3 后为 **13**（M2 前为 0，可 `git show b629152 --stat` 复核） |
+| 5 | 逐 blob sha 比对（API `git/trees?recursive=1` vs `git ls-tree -r HEAD`） | 远程与本地是否一致 | 完全一致，无缺失文件 |
+| 6 | `git log --format="%h %s" \| grep -cE "^[0-9a-f]+ (feat\|fix\|test)"` | 功能提交占比 | M3 后为 **12 / 44**（27%），M4–M6 会显著上升 |
+| 7 | `grep -rl "ghp_" .git/ \|\| echo clean` | 令牌是否泄露进仓库 | 输出 `clean` |
+| 8 | `git ls-files --error-unmatch .env` | `.env` 是否误入库 | 报错（未跟踪）即通过 |
 
 ---
 
@@ -373,7 +518,7 @@ git log -1 --format=%B        # 提交信息是否符合 type(scope): subject
 | # | 红线 | 本项目状态 | 证据 |
 | --- | --- | --- | --- |
 | X-02 | 一次性 `initial commit` 含全部功能 | ✅ 未触碰 | §5.2 四条论据；首次提交无功能代码 |
-| X-04 | 伪造 Git 历史 | ✅ 未触碰 | 8 次提交均可在远程复核；哈希回填单独提交而非预填 |
+| X-04 | 伪造 Git 历史 | ✅ 未触碰 | 44 次提交均可在远程复核；哈希回填单独提交而非预填；编号错位在 §4.2.0 自行披露并改正，未改写历史 |
 | X-05 | 泄露密钥 | ✅ 未触碰 | `.env` 未跟踪；`.git/` 内 `ghp_` 零命中；令牌仅经一次性 URL 注入，未写入 `.git/config` |
 | — | 仓库可见性 | ✅ 满足 | 未鉴权 HTTP 200（§2） |
 
@@ -392,6 +537,27 @@ git log -1 --format=%B        # 提交信息是否符合 type(scope): subject
 | 7 | `c25d8b98a6ef5918f374ffc0720253c3290b4552` | `04-项目实施基本流程与启动检查报告.md`、`README.md` |
 | 8 | `541cd56c8f654bc2aa30ab2f41426f501da3f6d7` | `docs/90-AI协作留痕/01-需求与架构.md`（回填 3 处 commit 哈希） |
 
+### A.2 M3 批次完整哈希（提交 35–44）
+
+§4.2 / §4.3 / §4.4 各表只给短哈希，便于阅读；这里补 M3 的完整哈希，供逐条 `git show` 复核。
+（提交 9–34 的完整哈希用 `git rev-parse <短哈希>` 展开即可，不再重复列出，避免本文件变成 `git log` 的副本。）
+
+| # | 完整哈希 | 改动文件 |
+| --- | --- | --- |
+| 35 | `b09bd4f72345bc1def593a41edcd498f38a0025b` | `tests/conftest.py`、`tests/test_documents.py`、`tests/test_indexing.py` |
+| 36 | `064b60cedcaafd176b816e706a75da93bb55f0c9` | `app/parsing.py`、`shared/enums.py` |
+| 37 | `668ee22fa35189d1c6033b79a8e10e1aea960771` | `app/chunking.py`、`app/indexing.py` |
+| 38 | `d49dba3d62cf50315b7d30316cc1a5908bc7981d` | `demo/` 5 份演示文件、`tools/make_demo_docs.py` |
+| 39 | `1ecd3c2017cf3165405ba0e20ea2ccbc9e44ea0f` | `.env.example`、`app/__init__.py`、`app/config.py`、`app/documents.py` |
+| 40 | `cb0a67bb29f8c28d201784f555202eeb1ecfe3e8` | `app/auth.py` |
+| 41 | `0f43297ae3292d7b7f074364ad4451d36178df1e` | `tools/e2e_gate.py`、`tools/rebuild_index.py` |
+| 42 | `b4297abe418c0b4d8fbfb11d1c12c6a6f49aca5a` | `README.md` |
+| 43 | `bb29b89090355fec93f998a6025eccf8c2030885` | `docs/30-接口契约/接口清单.md`、`docs/60-交付/运行说明.md` |
+| 44 | `050c5c0fb8776336c46cd1926d2e2e1069d150cc` | `docs/90-AI协作留痕/00-AI对话历史总档.md`、`docs/90-AI协作留痕/05-M3知识库可用.md` |
+
+> 提交 44 是 M3 的最后一次代码/文档提交。本文件（`Git提交日志.md`）自身的 M3 修订会在其后的
+> `docs(compliance): ...` 提交里落地，因此**它的哈希不写在本文件里**——写进去就又变成自指难题（见 §4.1）。
+
 ## 附录 B · 提交信息正反例对照
 
 | 反例 | 正例 | 问题在哪 |
@@ -409,3 +575,9 @@ git log -1 --format=%B        # 提交信息是否符合 type(scope): subject
 | --- | --- | --- |
 | V1.0 | 2026-11-07 | 首版：M0+M1 的 8 次提交全量记录、粒度自证、对话映射、远程历史异常说明、M2–M7 提交计划 |
 | V1.1 | 2026-11-07 | M1 收尾刷新：追加 §4.2 的 8 次门禁修复提交；统计更新为 20 次/35 次文件变更/+7575−49；§6 矩阵补链 G；§9.1 如实写出"M0/M1 提交数超估 13 次"的偏差与原因 |
+| V1.2 | 2026-11-08 | M2 收尾刷新：追加 §4.3（10 次功能代码提交）与三条自述——粒度越界（§4.3.1）、中间态不可运行（§4.3.2）、违反"先红后绿"（§4.3.3）；§5.1 指标刷为 32 次 / 69 文件 |
+| V1.3 | 2026-11-08 | M3 收尾刷新：追加 §4.4（10 次提交，含两次工作树实测的红→绿证据）；**补登 §4.2.0 漏掉的 6 次提交（9–12、21–22）并改正全文编号**；§5.1 改为逐项标注复现命令，指标刷为 44 次 / 85 文件 / 112 次文件变更；§10 复核指南新增"编号一致性"必查项 |
+
+> **V1.3 的自我更正**：V1.2 写 M2 提交为"17–26"，而真实顺序是"23–32"。原因见 §4.2.0——
+> 上一版漏登了 6 次提交，导致后续编号整体前移 6 位。这不是笔误，是**手工维护编号的必然结果**，
+> 因此在 §10 加了第 3 条复核项，让评审可以直接用一条命令证伪本文的编号。
