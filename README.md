@@ -4,7 +4,7 @@
 >
 > 把分散的校园政策文件，转化为**有出处、可判断、可执行、可追踪**的个人事务方案。
 
-![version](https://img.shields.io/badge/version-v1.1--design-blue)
+![version](https://img.shields.io/badge/version-v0.2.0--M2-brightgreen)
 ![python](https://img.shields.io/badge/python-3.11%2B-3776AB)
 ![flask](https://img.shields.io/badge/flask-3.x-000000)
 ![vue](https://img.shields.io/badge/vue-3.x-42B883)
@@ -17,14 +17,19 @@
 | --- | --- |
 | 合规清单 / 提交核对表 | ✅ 已完成（M0） |
 | PRD、数据模型、接口契约与清单 | ✅ 已完成（M1） |
-| 系统设计说明书 | ✅ V1.1 已定版（Flask 3 + Vue3） |
-| 后端工程 `app/` | 📐 设计完成，M2 实现 |
-| 前端工程 `frontend/` | 📐 设计完成，M2 实现 |
-| 快速开始命令 | 📐 随 M2 起生效 |
+| 系统设计说明书 | ✅ V1.2 已定版（Flask 3 + Vue3） |
+| 后端工程 `app/` | ✅ 可跑（M2）：应用工厂、契约外壳、13 张表、JWT 登录、`/health` |
+| 前端工程 `frontend/` | ✅ 可跑（M2）：Vue3 + Vite 骨架、登录页、工作台、降级提示条 |
+| 政策知识库（上传/解析/切分/索引） | ⬜ 未开始（M3） |
+| 问答 / 条件匹配 / 计划 / 任务 | ⬜ 未开始（M4–M5） |
+| 模型接入 | ⚠️ 未配置 → 当前运行在**降级模式**（界面顶部有常驻标识） |
 
-> **诚实声明**：本仓库当前处于**设计冻结阶段（M1）**，尚未提交可运行代码。下方"快速开始"描述 M2 完成后的目标运行方式，命令在代码落地前执行会失败。
+> **诚实声明**：当前可用功能是**健康检查 + 登录/角色鉴权 + 数据库建表**。
+> 下方"快速开始"的每条命令都已在 Windows + Python 3.13 实测通过；
+> §6.6 的验证清单按"当前能做什么"重写，未实现的功能明确标注为未开放，不写成"应该可以"。
+> 赛事明确禁止把未实现功能表述为已完成。
 >
-> 本表随里程碑更新。**参赛提交前若与实际情况不符，必须如实修改**——赛事明确禁止把未实现功能表述为已完成。
+> 本表随里程碑更新，每次结项都对照实际代码核对一遍。
 
 **工期**：2026-11-18 提交截止。里程碑 M0–M7 见 `04-项目实施基本流程与启动检查报告.md` §2.3。
 
@@ -178,81 +183,131 @@ flowchart TB
 
 ---
 
-## 6. 快速开始（目标 10 分钟）
+## 6. 快速开始（实测约 6 分钟）
 
-> 以下步骤在 M2 完成后生效。
+> 以下命令在 Windows 11 + Python 3.13.14 + Node 22 上逐条实测通过（2026-11-08，M2 结项）。
+> Linux / macOS 用 `scripts/setup.sh` 走同一流程。
 
-### 6.1 获取代码
+### 一键方式（推荐评审使用）
 
 ```bash
 git clone https://github.com/liqing-258/campus-policy-planner.git
 cd campus-policy-planner
+scripts\setup.bat            # macOS/Linux: bash scripts/setup.sh
 ```
 
-### 6.2 后端依赖
+`setup.bat` 依次做五件事：建 `.venv` → 装依赖 → 复制 `.env` → 建 13 张表 → 写入演示账号。
+每步失败即中止并打印原因。
+
+然后两个终端分别：
+
+```bash
+scripts\start-backend.bat    # http://127.0.0.1:5000/api/v1/health
+scripts\start-frontend.bat   # http://127.0.0.1:5173
+```
+
+### 手动方式（逐步核对时使用）
+
+**① 后端依赖**
 
 ```bash
 python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
-
+.venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-
-# 国内网络可加镜像
-# pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+# 国内网络加速：-i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
-### 6.3 配置环境变量
+**② 配置环境变量**
 
 ```bash
-# Windows
-copy .env.example .env
-# macOS / Linux
-cp .env.example .env
+copy .env.example .env          # macOS/Linux: cp .env.example .env
+python -c "import secrets;print(secrets.token_hex(32))"
 ```
 
-打开 `.env`，**至少填 `JWT_SECRET`**：`python -c "import secrets;print(secrets.token_hex(32))"`。需要 AI 生成能力再填 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`。不填 Key 也可完成全部演示（降级模式）。
+把输出填进 `.env` 的 `JWT_SECRET`。`LLM_*` 留空即降级模式（功能完整，只是不做生成式回答）。
 
-### 6.4 初始化数据库与演示数据
+**③ 建表 + 演示数据**
 
 ```bash
-python tools/init_db.py
-python tools/seed_demo.py
+.venv\Scripts\python.exe tools\init_db.py
+.venv\Scripts\python.exe tools\seed_demo.py
 ```
 
-输出示例：
+真实输出（可直接对照）：
 
 ```
-[ok] database initialized: data/app.db
-[ok] demo users: student/student123, admin/admin123
-[ok] demo documents: 3 (2 policy samples, 1 empty-text case)
-[ok] llm mode: degraded (LLM_API_KEY not set)
+[db] sqlite:///.../data/app.db
+[db] 表数量：13 / 期望 13
+[db] PRAGMA foreign_keys=1  journal_mode=wal
+[ok] 建表完成，共 13 张表
+[add ] student  role=student  password=student123
+[add ] admin    role=admin    password=admin123
+[ok] 用户总数：2
 ```
 
-### 6.5 启动
+**④ 环境自检**
 
 ```bash
-# 终端 1：后端
-python run.py            # 开发模式，http://127.0.0.1:5000
-
-# 终端 2：前端
-cd frontend
-npm install
-npm run dev              # http://127.0.0.1:5173
+.venv\Scripts\python.exe tools\selfcheck.py
 ```
 
-或用一键脚本：`scripts/start-backend.bat` / `scripts/start-frontend.bat`（macOS/Linux 用同名 `.sh`）。
+20 项检查，任一项 FAIL 都会给出具体修法。看到最后一行
+`结论：环境就绪` 再往下走。
+
+**⑤ 启动**
+
+```bash
+# 终端 1
+.venv\Scripts\python.exe server.py          # 也可用 scripts\start-backend.bat
+
+# 终端 2
+cd frontend && npm install && npm run dev   # 也可用 scripts\start-frontend.bat
+```
 
 | 服务 | 地址 |
 | --- | --- |
 | 前端 | http://127.0.0.1:5173 |
-| 健康检查 | http://127.0.0.1:5000/api/v1/health |
+| 后端健康检查 | http://127.0.0.1:5000/api/v1/health |
 | 接口清单 | `docs/30-接口契约/接口清单.md` |
 
-### 6.6 验证一条完整链路（约 3 分钟）
+### 6.6 验证清单（当前已实现的部分）
+
+**命令行验证（约 1 分钟）**
+
+```bash
+# 1. 健康检查：code=0，llm_mode=degraded（因未配 Key）
+curl http://127.0.0.1:5000/api/v1/health
+
+# 2. 登录拿令牌
+curl -X POST http://127.0.0.1:5000/api/v1/auth/login ^
+  -H "Content-Type: application/json" ^
+  -d "{\"username\":\"student\",\"password\":\"student123\"}"
+
+# 3. 用令牌查身份（把 <TOKEN> 换成上一步返回值）
+curl http://127.0.0.1:5000/api/v1/auth/me -H "Authorization: Bearer <TOKEN>"
+
+# 4. 不带令牌访问 → 401 + code 3001
+curl http://127.0.0.1:5000/api/v1/auth/me
+```
+
+**界面验证（约 2 分钟）**
+
+1. 打开 http://127.0.0.1:5173 → 顶部出现黄色**降级模式**提示条（未配 Key 时的正确行为）；
+2. 用 `student / student123` 登录 → 进入工作台；
+3. 工作台「系统状态」卡片显示 `db=ok`、`模型模式=degraded`、政策文件 `0 份`；
+4. 退出后访问 `/` → 被重定向回登录页（前端路由守卫）。
+
+**自动化验证**
+
+```bash
+.venv\Scripts\python.exe -m pytest        # M2 阶段 31 项全绿
+.venv\Scripts\python.exe tools\dump_routes.py   # 真实接口数（M2 为 3 条）
+```
+
+> **未开放的功能不在此列出**：政策上传/解析（M3）、问答（M4）、条件匹配与计划（M5）
+> 尚未实现，界面上也没有对应入口——不画"点了会报错"的空壳按钮。
+
+### 6.7 验证一条完整链路（M4 完成后可用，约 3 分钟）
 
 1. 用 `student / student123` 登录；
 2. 进「政策知识库」，确认演示文档状态为 `indexed`；
@@ -361,78 +416,91 @@ cd frontend && npm run typecheck && npm run build
 ```text
 campus-policy-planner/
 ├── app/                        # Flask 应用（扁平按域一文件）
-│   ├── __init__.py             # create_app
-│   ├── config.py               # 配置集中读取
-│   ├── contract.py             # 统一响应外壳（唯一实现）
-│   ├── errors.py               # 错误码与异常体系
-│   ├── auth.py                 # JWT、角色守卫
-│   ├── documents.py            # 上传 / 列表 / 删除
-│   ├── parsing.py              # PDF / DOCX / TXT 解析
-│   ├── chunking.py             # 结构化切分
-│   ├── retrieval.py            # BM25 + 向量 + RRF
-│   ├── qa.py                   # 结构化问答 + 引用校验
-│   ├── rules.py                # 规则抽取 + 三态求值
-│   ├── plans.py                # 计划草稿 / 确认
-│   ├── tasks.py                # 任务 CRUD 与状态机
-│   ├── workflows.py            # 六节点编排 + run 轨迹
-│   ├── models.py               # SQLAlchemy 模型（13 张表）
-│   ├── schemas.py              # pydantic v2 契约
-│   └── llm.py                  # 模型适配器（可降级）
+│   ├── __init__.py             # ✅ create_app 工厂 + 蓝图注册 + dump_routes
+│   ├── config.py               # ✅ 配置集中读取（唯一 os.getenv 出口）
+│   ├── contract.py             # ✅ 统一响应外壳（唯一实现）
+│   ├── errors.py               # ✅ 错误码与异常体系
+│   ├── runtime.py              # ✅ 请求内/脚本外统一的配置访问
+│   ├── schemas.py              # ✅ pydantic v2 请求契约
+│   ├── models.py               # ✅ SQLAlchemy 模型（13 张表）
+│   ├── auth.py                 # ✅ JWT、角色守卫、登录
+│   ├── health.py               # ✅ /health
+│   ├── documents.py            # ⬜ M3 上传 / 列表 / 删除
+│   ├── parsing.py              # ⬜ M3 PDF / DOCX / TXT 解析
+│   ├── chunking.py             # ⬜ M3 结构化切分
+│   ├── retrieval.py            # ⬜ M4 BM25 + 向量 + RRF
+│   ├── qa.py                   # ⬜ M4 结构化问答 + 引用校验
+│   ├── rules.py                # ⬜ M5 规则抽取 + 三态求值
+│   ├── plans.py                # ⬜ M5 计划草稿 / 确认
+│   ├── tasks.py                # ⬜ M5 任务 CRUD 与状态机
+│   ├── workflows.py            # ⬜ M6 六节点编排 + run 轨迹
+│   └── llm.py                  # ⬜ M4 模型适配器（可降级）
 ├── shared/                     # 纯标准库，前后端共用
-│   ├── enums.py                # 状态与算子枚举
-│   ├── codes.py                # 错误码常量
-│   └── schema/                 # JSON Schema
+│   ├── enums.py                # ✅ 状态与算子枚举 + 转移白名单
+│   ├── codes.py                # ✅ 错误码常量
+│   └── schema/                 # ⬜ JSON Schema
 ├── frontend/                   # Vue3 + Vite
-│   └── src/{views,components,api,stores,types}
+│   └── src/{api,stores,views}
 ├── data/                       # app.db + uploads/（不入库）
-├── demo/                       # 虚构演示文档（入库）
+├── demo/                       # ⬜ 虚构演示文档（M3 生成，入库）
 ├── docs/                       # 文档体系（00~90 编号）
-├── tools/                      # init_db / seed_demo / check_contract / md_to_docx
-├── scripts/                    # start-backend / start-frontend 各 .bat + .sh
-├── tests/{unit,api,edge}
+├── tools/                      # ✅ init_db / seed_demo / selfcheck / dump_routes
+├── scripts/                    # ✅ setup / start-backend / start-frontend（.bat + .sh）
+├── tests/                      # ✅ 契约 / 鉴权 / 健康检查 / 密钥扫描
 ├── requirements.txt
 ├── .env.example
 ├── .gitignore
-├── run.py
+├── server.py                   # 启动入口（waitress）
+├── pytest.ini
 └── README.md
 ```
+
+> ✅ = 已实现且有测试或实测；⬜ = 尚未实现。这份树不允许"先画再写"——M2 只勾了真正跑起来的部分。
 
 ---
 
 ## 12. 接口速览
 
-基础路径 `/api/v1`，共 **30 条**（GET 14 / POST 12 / PATCH 3 / DELETE 1）。除 `/health`、`/auth/login` 外需 `Authorization: Bearer <token>`。
+基础路径 `/api/v1`。设计总量 **30 条**，**当前已实现 3 条**（下表粗体行）。
+已实现条数不允许手填，用脚本导出核对：
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/health` | 健康检查（DB、模型模式、片段数） |
-| POST | `/auth/login` | 登录 |
-| GET | `/auth/me` | 当前用户 |
-| POST | `/documents` | 上传（admin） |
-| GET | `/documents` | 列表 |
-| GET | `/documents/{id}` | 详情 |
-| DELETE | `/documents/{id}` | 软删除（admin） |
-| POST | `/documents/{id}/reparse` | 重新解析（admin） |
-| GET | `/documents/{id}/chunks` | 片段列表 |
-| GET | `/chunks/{id}` | 单片段 + 定位 |
-| POST | `/retrieval/search` | 纯检索（调试） |
-| POST | `/qa/ask` | 提问，返回答案 + 引用 + 轨迹 |
-| GET | `/conversations` | 会话列表 |
-| GET | `/conversations/{id}/messages` | 消息列表 |
-| POST | `/messages/{id}/feedback` | 答案反馈 |
-| POST | `/documents/{id}/rules/extract` | 规则抽取（admin） |
-| GET | `/documents/{id}/rules` | 规则列表 |
-| PATCH | `/rules/{id}` | 修正规则（admin） |
-| POST | `/matches` | 三态匹配 |
-| GET | `/matches/{id}` | 匹配详情 |
-| POST | `/plans/draft` | 计划草稿（不落库） |
-| POST | `/plans/{id}/confirm` | 确认计划（落库） |
-| GET / PATCH | `/plans`、`/plans/{id}` | 计划列表与编辑 |
-| GET / POST | `/tasks` | 任务列表 / 手工新增 |
-| PATCH | `/tasks/{id}` | 编辑任务 |
-| POST | `/tasks/{id}/status` | 状态流转 |
-| GET | `/tasks/stats` | 进度统计 |
-| GET | `/workflows/{run_id}` | 工作流轨迹 |
+```bash
+.venv\Scripts\python.exe tools\dump_routes.py --prefix /api/v1
+# 合计 3 条  按方法：GET 2 / POST 1
+```
+
+除 `/health`、`/auth/login` 外需 `Authorization: Bearer <token>`。
+
+| 方法 | 路径 | 说明 | 状态 |
+| --- | --- | --- | --- |
+| **GET** | **`/health`** | **健康检查（DB、模型模式、片段数）** | ✅ M2 |
+| **POST** | **`/auth/login`** | **登录，签发 JWT** | ✅ M2 |
+| **GET** | **`/auth/me`** | **当前用户与角色** | ✅ M2 |
+| POST | `/documents` | 上传（admin） | ⬜ M3 |
+| GET | `/documents` | 列表 | ⬜ M3 |
+| GET | `/documents/{id}` | 详情 | ⬜ M3 |
+| DELETE | `/documents/{id}` | 软删除（admin） | ⬜ M3 |
+| POST | `/documents/{id}/reparse` | 重新解析（admin） | ⬜ M3 |
+| GET | `/documents/{id}/chunks` | 片段列表 | ⬜ M3 |
+| GET | `/chunks/{id}` | 单片段 + 定位 | ⬜ M3 |
+| POST | `/retrieval/search` | 纯检索（调试） | ⬜ M4 |
+| POST | `/qa/ask` | 提问，返回答案 + 引用 + 轨迹 | ⬜ M4 |
+| GET | `/conversations` | 会话列表 | ⬜ M4 |
+| GET | `/conversations/{id}/messages` | 消息列表 | ⬜ M4 |
+| POST | `/messages/{id}/feedback` | 答案反馈 | ⬜ M6 |
+| POST | `/documents/{id}/rules/extract` | 规则抽取（admin） | ⬜ M5 |
+| GET | `/documents/{id}/rules` | 规则列表 | ⬜ M5 |
+| PATCH | `/rules/{id}` | 修正规则（admin） | ⬜ M5 |
+| POST | `/matches` | 三态匹配 | ⬜ M5 |
+| GET | `/matches/{id}` | 匹配详情 | ⬜ M5 |
+| POST | `/plans/draft` | 计划草稿（不落库） | ⬜ M5 |
+| POST | `/plans/{id}/confirm` | 确认计划（落库） | ⬜ M5 |
+| GET / PATCH | `/plans`、`/plans/{id}` | 计划列表与编辑 | ⬜ M5 |
+| GET / POST | `/tasks` | 任务列表 / 手工新增 | ⬜ M5 |
+| PATCH | `/tasks/{id}` | 编辑任务 | ⬜ M5 |
+| POST | `/tasks/{id}/status` | 状态流转 | ⬜ M5 |
+| GET | `/tasks/stats` | 进度统计 | ⬜ M6 |
+| GET | `/workflows/{run_id}` | 工作流轨迹 | ⬜ M6 |
 
 **错误码**：0 成功 / 1xxx 参数 / 2xxx 资源 / 3xxx 权限 / **4xxx AI 链路（4001 证据不足、4002 输出非法、4003 引用越界、4004 超时、4005 上游错误、4006 降级中）** / 9xxx 系统。详见 `docs/30-接口契约/接口契约统一规范.md`。
 
@@ -484,6 +552,16 @@ AI 生成的任务可能遗漏或过度解读。让用户先看、先改、再�
 
 ## 15. 已知限制
 
+### 15.1 当前里程碑（M2）的阶段性限制
+
+1. **只实现了 3 条接口**：`/health`、`/auth/login`、`/auth/me`。政策库、问答、匹配、计划、任务全部未实现，前端也没有对应入口。
+2. **前端只有两个页面**：登录页与工作台。工作台里的"政策文件 0 份"是真实读数，不是占位数字。
+3. **登录限流是进程内内存实现**：重启即清零，多实例部署会失效（需换 Redis）。当前足以防住脚本暴力尝试。
+4. **SQLite 单写者**：并发写入靠 `busy_timeout=5000` 排队，不做连接池分片。演示规模（单用户操作）不构成问题。
+5. **没有 Alembic 迁移**：建表用 `tools/init_db.py`。改字段需 `--drop` 重建，会清空数据。
+
+### 15.2 项目整体限制（贯穿全部里程碑）
+
 1. **不支持扫描件 OCR**。无文本层的 PDF 标记为"疑似扫描件"并提示，不静默失败，也不假装解析成功。
 2. **复杂表格解析不完整**。多栏、合并单元格可能丢失结构，答案中提示"表格内容建议核对原文"。
 3. **规则抽取依赖模型**。降级模式下抽取能力显著下降，仅提供关键词模板。
@@ -505,7 +583,7 @@ AI 生成的任务可能遗漏或过度解读。让用户先看、先改、再�
 | 文档内容 | 视为**不可信数据**，不执行、不作为指令、不参与配置 |
 | 模型输出 | 经 pydantic + 引用白名单校验后才落库 |
 | 个人信息 | 最小必要采集（学籍类型/年级/绩点/排名等），字段走白名单；不采集身份证号、手机号 |
-| 权限 | 学生/管理员两角色；所有查询强制 `user_id` 过滤；越权返回 3002 |
+| 权限 | 学生/管理员两角色。**角色不足返回 3002/403**；**访问他人资源返回 2002/404**（不暴露资源是否存在，见 US-09） |
 | 演示数据 | 全部虚构，页面与文档双重标注 |
 | 免责 | 匹配与计划页面固定展示"仅辅助参考，不替代学校正式认定" |
 
