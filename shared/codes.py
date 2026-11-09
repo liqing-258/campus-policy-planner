@@ -21,8 +21,19 @@ PARSE_IN_PROGRESS = 2007     # 409 解析进行中
 UNAUTHENTICATED = 3001       # 401 未登录或令牌过期
 FORBIDDEN = 3002             # 403 无权限
 
+# 4xxx：AI 链路。前三个是**业务态**，HTTP 保持 200（见契约规范 §3.3）
+INSUFFICIENT_EVIDENCE = 4001  # 200 证据不足，拒答
+LLM_OUTPUT_INVALID = 4002     # 502 模型输出结构非法（重试后仍失败）
+CITATION_REJECTED = 4003      # 200 引用越界，已剔除
+LLM_TIMEOUT = 4004           # 504 模型超时
+LLM_UPSTREAM_ERROR = 4005    # 502 上游 5xx / 鉴权失败
+DEGRADED_MODE = 4006         # 200 已降级（无 Key / 仅 BM25）
+
 INTERNAL_ERROR = 9001        # 500 未预期异常
 DB_UNAVAILABLE = 9002        # 503 数据库不可用
+
+# 业务态错误码：HTTP 必须 200，前端按 code 渲染提示卡而非报错
+BUSINESS_STATE_CODES = frozenset({INSUFFICIENT_EVIDENCE, CITATION_REJECTED, DEGRADED_MODE})
 
 # ---------- 业务码 → HTTP 状态 ----------
 CODE_HTTP: dict[int, int] = {
@@ -37,6 +48,12 @@ CODE_HTTP: dict[int, int] = {
     PARSE_IN_PROGRESS: 409,
     UNAUTHENTICATED: 401,
     FORBIDDEN: 403,
+    INSUFFICIENT_EVIDENCE: 200,
+    LLM_OUTPUT_INVALID: 502,
+    CITATION_REJECTED: 200,
+    LLM_TIMEOUT: 504,
+    LLM_UPSTREAM_ERROR: 502,
+    DEGRADED_MODE: 200,
     INTERNAL_ERROR: 500,
     DB_UNAVAILABLE: 503,
 }
@@ -54,6 +71,12 @@ CODE_MESSAGES: dict[int, str] = {
     PARSE_IN_PROGRESS: "解析进行中，请稍后再试",
     UNAUTHENTICATED: "未登录或登录已过期",
     FORBIDDEN: "没有权限执行该操作",
+    INSUFFICIENT_EVIDENCE: "未在政策库中找到足够依据，无法给出可靠回答",
+    LLM_OUTPUT_INVALID: "模型返回内容结构不符合约定，已重试仍失败",
+    CITATION_REJECTED: "部分引用无法对应到原文，已剔除",
+    LLM_TIMEOUT: "模型响应超时",
+    LLM_UPSTREAM_ERROR: "模型服务暂时不可用",
+    DEGRADED_MODE: "当前为降级模式：未接入模型，仅返回原文片段",
     INTERNAL_ERROR: "服务器内部错误",
     DB_UNAVAILABLE: "数据库暂时不可用",
 }

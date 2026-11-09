@@ -66,8 +66,8 @@ class Settings:
         self.log_level = _str("LOG_LEVEL", "INFO").upper()
         self.host = _str("HOST", "127.0.0.1")
         self.port = _int("PORT", 5000)
-        # 版本号随里程碑前进：M2 = 0.2.0，M3 = 0.3.0，以此类推
-        self.version = _str("APP_VERSION", "0.3.0")
+        # 版本号随里程碑前进：M2 = 0.2.0，M3 = 0.3.0，M4 = 0.4.0，以此类推
+        self.version = _str("APP_VERSION", "0.4.0")
 
         # --- 数据库 ---
         self.database_url = _str("DATABASE_URL", "sqlite:///./data/app.db")
@@ -90,6 +90,12 @@ class Settings:
         self.llm_timeout_seconds = _int("LLM_TIMEOUT_SECONDS", 30)
         self.llm_temperature = _float("LLM_TEMPERATURE", 0.2)
         self.llm_max_retry = _int("LLM_MAX_RETRY", 1)
+        # M4 实测：deepseek-flash 是**推理模型**，reasoning_tokens 会先吃掉 max_tokens 预算。
+        # 设成 200 时实测 reasoning 占 62，正文才 138；设成 100 时 100 全给推理，content 直接为空。
+        # 首次定 1200 仍不够：评测集 C-01（答案需组合三处片段）实测 reasoning_tokens=1200、
+        # 正文为空，被 llm.py 的预算检测报成 4002——**防住了误判成拒答，但阈值给少了**。
+        # 因此定 2500，并按答案长度预留推理开销。
+        self.llm_max_tokens = _int("LLM_MAX_TOKENS", 2500)
 
         # --- Embedding ---
         self.embedding_base_url = _str("EMBEDDING_BASE_URL", "")
@@ -98,13 +104,20 @@ class Settings:
 
         # --- 检索与切分 ---
         self.rag_top_k = _int("RAG_TOP_K", 6)
-        # 拒答阈值。注意：M3 实测证明**原始 BM25 分数不可用作阈值**（无关查询可能比相关查询分更高，
-        # 见 app/indexing.py:search 文档串与 tests/test_indexing.py），因此 M4 里这一项只会比对
-        # "归一化后的分数"，不直接作用于原始 BM25 分。
+        # 拒答阈值。M3 曾据此认为"原始 BM25 分数不能判断相关性"；M4 加上字符 bigram 之后
+        # 排序质量改善（相关 2.255 > 无关 1.9205），但**两个样本不足以据此定阈值**，
+        # 因此本项仍未参与拒答决策，只是占位。真正生效的是下面的覆盖率。
         self.rag_min_score = _float("RAG_MIN_SCORE", 0.35)
         # 检索粗筛：命中的查询词项占比低于此值视为"主题不相关"，直接不进 LLM。
-        # 0.6 是 3 片段 toy 语料上观察到的分界（相关≥0.67 / 无关≤0.5），**未经评测集校准**，M4 必须重新定标。
-        self.rag_min_coverage = _float("RAG_MIN_COVERAGE", 0.6)
+        # **M4 用 eval/qa_set.jsonl 的 24 条定标**（tools/run_eval.py --sweep）：
+        #   阈值  0.00  0.15  0.25  0.35  0.50
+        #   通过  91.7% 100%  95.8% 100%  91.7%
+        # 非单调，说明差异幅度在**模型随机性抖动范围内**（temperature=0.2，单条会跳），
+        # 不能把 0.15 与 0.35 的差别解释成阈值优劣。选 0.35 的理由是：
+        # ① 同为 100% 的两个点里更保守的一个；② 语义清晰（至少命中 1/3 查询词项）；
+        # ③ 0.50 时 E 类掉到 3/4，说明 0.35 距离"过严"仍有余量。
+        # 24 条不足以精确定标，M6 扩充评测集后必须重新校准。
+        self.rag_min_coverage = _float("RAG_MIN_COVERAGE", 0.35)
         self.chunk_size = _int("CHUNK_SIZE", 600)
         self.chunk_overlap = _int("CHUNK_OVERLAP", 80)
         # 有效文本阈值：低于此字符数判 empty（系统设计说明书 §4.2）

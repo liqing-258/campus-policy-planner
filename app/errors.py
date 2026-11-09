@@ -12,18 +12,26 @@ from shared.codes import CODE_HTTP, CODE_MESSAGES
 
 
 class ApiError(Exception):
-    """业务异常基类。子类只需声明 code，HTTP 状态由 CODE_HTTP 推导。"""
+    """业务异常基类。子类只需声明 code，HTTP 状态由 CODE_HTTP 推导。
+
+    `payload` 是可选的结构化附加数据。业务态异常（4001/4003/4006）**必须**带 payload：
+    拒答时要回传检索到的候选片段供用户自行查看，降级时要回传原文片段。
+    没有它，前端只能显示一句"证据不足"，用户无法判断是"库里真没有"还是"系统坏了"。
+    """
 
     code: int = codes.INVALID_PARAM
     http_status: int | None = None
     default_message: str | None = None
+    payload: dict | None = None
 
     def __init__(self, message: str | None = None, *, code: int | None = None,
-                 http_status: int | None = None) -> None:
+                 http_status: int | None = None, payload: dict | None = None) -> None:
         if code is not None:
             self.code = code
         if http_status is not None:
             self.http_status = http_status
+        if payload is not None:
+            self.payload = payload
         self.message = (
             message
             or self.default_message
@@ -83,6 +91,46 @@ class Unauthenticated(ApiError):
 
 class Forbidden(ApiError):
     code = codes.FORBIDDEN
+
+
+# ---------- AI 链路（4001/4003/4006 是业务态，HTTP 保持 200）----------
+class InsufficientEvidence(ApiError):
+    """证据不足 → 拒答。必须带 payload：候选片段 + 拒答原因，供用户自行查阅。"""
+
+    code = codes.INSUFFICIENT_EVIDENCE
+
+
+class LlmOutputInvalid(ApiError):
+    """模型输出结构非法（重试后仍失败）。
+
+    `retriable=False` 用于**重试也没用**的场合——典型是 max_tokens 被推理耗尽导致正文为空：
+    参数不变的情况下再试一次必然同样空，白等一个 RTT 还可能多花一次 token 钱。
+    """
+
+    code = codes.LLM_OUTPUT_INVALID
+    retriable = True
+
+    def __init__(self, message: str | None = None, *, retriable: bool | None = None,
+                 **kwargs) -> None:
+        if retriable is not None:
+            self.retriable = retriable
+        super().__init__(message, **kwargs)
+
+
+class CitationRejected(ApiError):
+    code = codes.CITATION_REJECTED
+
+
+class LlmTimeout(ApiError):
+    code = codes.LLM_TIMEOUT
+
+
+class LlmUpstreamError(ApiError):
+    code = codes.LLM_UPSTREAM_ERROR
+
+
+class DegradedMode(ApiError):
+    code = codes.DEGRADED_MODE
 
 
 # ---------- 系统 ----------
