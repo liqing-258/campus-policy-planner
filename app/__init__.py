@@ -51,10 +51,12 @@ def create_app(overrides: dict | None = None) -> Flask:
     from app import auth as auth_mod
     from app import documents as documents_mod
     from app import health as health_mod
+    from app import qa as qa_mod
 
     app.register_blueprint(health_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(auth_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(documents_mod.bp, url_prefix=API_PREFIX)
+    app.register_blueprint(qa_mod.bp, url_prefix=API_PREFIX)
 
     _register_root_route(app)
 

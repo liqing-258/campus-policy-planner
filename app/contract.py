@@ -76,13 +76,20 @@ def ok(data=None, message: str = "success", code: int = OK,
     return jsonify(body), http_status
 
 
-def fail(code: int, message: str | None = None, http_status: int | None = None) -> tuple[Response, int]:
+def fail(code: int, message: str | None = None, http_status: int | None = None,
+         data=None) -> tuple[Response, int]:
+    """失败响应。
+
+    `data` 仅用于**业务态**码（4001 拒答 / 4003 引用剔除 / 4006 降级）：
+    这三种情况下 HTTP 仍是 200，前端要正常渲染一张卡片，而不是弹错误。
+    卡片里需要候选片段等结构化信息，因此外壳的 data 不能一律为 null。
+    """
     from shared.codes import CODE_HTTP
 
     body = {
         "code": code,
         "message": message or CODE_MESSAGES.get(code, "请求处理失败"),
-        "data": None,
+        "data": data,
         "request_id": _request_id(),
         "timestamp": utc_now_iso(),
     }
@@ -145,7 +152,7 @@ def init_contract(app: Flask) -> None:
 
     @app.errorhandler(ApiError)
     def _handle_api_error(exc: ApiError):
-        return fail(exc.code, exc.message, exc.status)
+        return fail(exc.code, exc.message, exc.status, data=exc.payload)
 
     @app.errorhandler(HTTPException)
     def _handle_http_exception(exc: HTTPException):
