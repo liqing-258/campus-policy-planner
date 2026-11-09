@@ -35,9 +35,48 @@ _STOPWORDS = _STOPWORDS | _INTERROGATIVE_STOPWORDS
 _jieba_lock = threading.Lock()
 _jieba_ready = False
 
+# 是否在词项之外追加"汉字二元组"（bigram）。见 tokenize() 的说明，默认开启。
+USE_BIGRAMS = True
 
-def tokenize(text: str) -> list[str]:
-    """中文 jieba + 英文/数字小写切分。返回有意义的词项列表（含重复）。"""
+_CJK_RANGE = ("\u4e00", "\u9fff")
+
+
+def _is_cjk(char: str) -> bool:
+    return _CJK_RANGE[0] <= char <= _CJK_RANGE[1]
+
+
+def _bigrams(word: str) -> list[str]:
+    """纯中文词切成长度 2 的滑动窗口。非中文词（英文、数字、混合）不切。
+
+    两字词的 bigram 就是它自己（"申请" → "申请"），必须排除，
+    否则同一个词项被计两次 term_freq，BM25 分数凭空抬高、覆盖率分母也被撑大。
+    """
+    if len(word) < 2 or not all(_is_cjk(ch) for ch in word):
+        return []
+    return [word[i:i + 2] for i in range(len(word) - 1) if word[i:i + 2] != word]
+
+
+def tokenize(text: str, *, bigrams: bool | None = None) -> list[str]:
+    """中文 jieba + 英文/数字小写切分。返回有意义的词项列表（含重复）。
+
+    **为什么还要额外产出 bigram**——M4 实测发现的真缺陷，不是画蛇添足：
+
+    jieba 对同一个词在不同上下文里切法不一致。实测：
+
+        片段「上一学年成绩单」 → ['学年成绩']        ← 没有切出"成绩单"
+        查询「那成绩单要原件吗」 → ['成绩单', '原件']
+
+    两边字面交集为空（"成绩单" ≠ "学年成绩"），BM25 直接判定零命中，
+    用户问"成绩单要什么格式"会得到"未找到足够依据"——而原文白纸黑字写着。
+    加自定义词典也治不好：实测 `jieba.add_word("成绩单")` 之后该句仍切出"学年成绩"。
+
+    这是中文检索的固有难点：分词器的目标是"最优切分"，而检索要的是"切法一致"。
+    解法是同时保留**字符二元组**：片段产出「学年/年成/成绩」，查询产出「成绩/绩单」，
+    交集"成绩"即可召回。代价是词项数增加约一倍，但 IDF 会自动压低高频 bigram 的权重，
+    排序质量实测反而更好（见 docs/90-AI协作留痕/06-M4问答可信.md）。
+
+    `bigrams=False` 保留原行为，用于对比实验与回归定位。
+    """
     global _jieba_ready
     if not text:
         return []
@@ -50,6 +89,7 @@ def tokenize(text: str) -> list[str]:
                 jieba.initialize()
                 _jieba_ready = True
 
+    want_bigrams = USE_BIGRAMS if bigrams is None else bigrams
     tokens: list[str] = []
     for token in jieba.cut(text):
         item = token.strip().lower()
@@ -61,6 +101,8 @@ def tokenize(text: str) -> list[str]:
         if item.isspace():
             continue
         tokens.append(item)
+        if want_bigrams:
+            tokens.extend(_bigrams(item))
     return tokens
 
 
@@ -284,3 +326,38 @@ def build_from_database(app) -> dict:
     """脚本入口：在给定 app 上重建索引。"""
     with app.app_context():
         return rebuild_index()
+
+
+# 本进程是否已经"尝试过懒加载"。有了它，"库确实是空的"这种情况不会每次查询都扫一遍表。
+LOADED_KEY = "bm25_index_loaded"
+
+
+def ensure_index_loaded() -> bool:
+    """进程启动后首次检索时，把库里的片段装进内存索引。返回本次是否真的重建了。
+
+    为什么必须有这一步：索引不落盘，重启后内存里是空的，而库里的片段还在。
+    缺了它，"问一个库里明明有答案的问题"会被答成"知识库为空：尚未上传任何已解析的政策文件"
+    ——M4 联调时真踩到了（`/health` 报 document_count=4、chunk_count=10，
+    `/qa/ask` 却说知识库为空），而且这个错误信息会把排查方向指向"去重新上传文件"。
+
+    只在索引为空时才扫表；上传/重解析/删除都会主动 rebuild，所以不会读到过期数据。
+    """
+    from flask import current_app, has_app_context
+
+    current = get_index()
+    if current.is_built and current.size:
+        return False  # 已经有数据了，不必再查库
+    if has_app_context():
+        if current_app.extensions.get(LOADED_KEY):
+            return False  # 本进程已尝试过，且当时库就是空的
+        current_app.extensions[LOADED_KEY] = True
+
+    from sqlalchemy import func, select
+
+    from app.models import DocumentChunk, db
+
+    total = db.session.execute(select(func.count()).select_from(DocumentChunk)).scalar() or 0
+    if not total:
+        return False
+    rebuild_index()
+    return True
