@@ -1,0 +1,232 @@
+[
+  {
+    "min_coverage": 0.0,
+    "total": 24,
+    "passed": 22,
+    "stats": {
+      "A": {
+        "name": "可回答-单条",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "B": {
+        "name": "应拒答-库内无",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "C": {
+        "name": "可回答-需组合",
+        "total": 4,
+        "passed": 3,
+        "rate": 0.75
+      },
+      "D": {
+        "name": "近义干扰",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "E": {
+        "name": "引用边界",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "F": {
+        "name": "提示注入",
+        "total": 4,
+        "passed": 3,
+        "rate": 0.75
+      }
+    },
+    "citation_violations": 0,
+    "refuse_rate_b": 1.0,
+    "workdir": "C:\\Users\\LENOVO\\AppData\\Local\\Temp\\campus-eval-m2bxfcij"
+  },
+  {
+    "min_coverage": 0.15,
+    "total": 24,
+    "passed": 24,
+    "stats": {
+      "A": {
+        "name": "可回答-单条",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "B": {
+        "name": "应拒答-库内无",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "C": {
+        "name": "可回答-需组合",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "D": {
+        "name": "近义干扰",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "E": {
+        "name": "引用边界",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "F": {
+        "name": "提示注入",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      }
+    },
+    "citation_violations": 0,
+    "refuse_rate_b": 1.0,
+    "workdir": "C:\\Users\\LENOVO\\AppData\\Local\\Temp\\campus-eval-5560lgk0"
+  },
+  {
+    "min_coverage": 0.25,
+    "total": 24,
+    "passed": 23,
+    "stats": {
+      "A": {
+        "name": "可回答-单条",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "B": {
+        "name": "应拒答-库内无",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "C": {
+        "name": "可回答-需组合",
+        "total": 4,
+        "passed": 3,
+        "rate": 0.75
+      },
+      "D": {
+        "name": "近义干扰",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "E": {
+        "name": "引用边界",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "F": {
+        "name": "提示注入",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      }
+    },
+    "citation_violations": 0,
+    "refuse_rate_b": 1.0,
+    "workdir": "C:\\Users\\LENOVO\\AppData\\Local\\Temp\\campus-eval-9hsdpdb7"
+  },
+  {
+    "min_coverage": 0.35,
+    "total": 24,
+    "passed": 24,
+    "stats": {
+      "A": {
+        "name": "可回答-单条",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "B": {
+        "name": "应拒答-库内无",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "C": {
+        "name": "可回答-需组合",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "D": {
+        "name": "近义干扰",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "E": {
+        "name": "引用边界",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "F": {
+        "name": "提示注入",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      }
+    },
+    "citation_violations": 0,
+    "refuse_rate_b": 1.0,
+    "workdir": "C:\\Users\\LENOVO\\AppData\\Local\\Temp\\campus-eval-vqrgqccs"
+  },
+  {
+    "min_coverage": 0.5,
+    "total": 24,
+    "passed": 22,
+    "stats": {
+      "A": {
+        "name": "可回答-单条",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "B": {
+        "name": "应拒答-库内无",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "C": {
+        "name": "可回答-需组合",
+        "total": 4,
+        "passed": 3,
+        "rate": 0.75
+      },
+      "D": {
+        "name": "近义干扰",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      },
+      "E": {
+        "name": "引用边界",
+        "total": 4,
+        "passed": 3,
+        "rate": 0.75
+      },
+      "F": {
+        "name": "提示注入",
+        "total": 4,
+        "passed": 4,
+        "rate": 1.0
+      }
+    },
+    "citation_violations": 0,
+    "refuse_rate_b": 1.0,
+    "workdir": "C:\\Users\\LENOVO\\AppData\\Local\\Temp\\campus-eval-z_6x64xn"
+  }
+]
