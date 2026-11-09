@@ -86,3 +86,82 @@ def student_headers(student_token):
 @pytest.fixture()
 def admin_headers(admin_token):
     return auth(admin_token)
+
+
+# ---------------------------------------------------------------- M5 夹具
+@pytest.fixture()
+def policy(app):
+    """一份政策文件 + 3 个片段 + 7 条已复核规则。
+
+    为什么直接写库而不走上传：规则抽取要调模型，抽取结果本身由 test_rules.py 验；
+    匹配/计划验的是"给定规则后算得对不对"，用手工规则把被测对象与模型解耦。
+    规则覆盖 met / not_met / unknown(missing_info) / unknown(ambiguous_rule) 四类，
+    外加 material / deadline 两类用来生成计划任务。
+    """
+    from app.models import Document, DocumentChunk, PolicyRule
+
+    chunks = [
+        ("第四条 申请国家励志奖学金，应当同时具备下列条件：学年平均学分绩点不低于 3.0，"
+         "且专业排名位于前 30%；经认定为家庭经济困难。", 2, "第二章 申请条件"),
+        ("第九条 申请国家励志奖学金应当提交下列材料：申请表、上一学年成绩单、"
+         "家庭经济困难学生认定结果告知书、个人申请书。", 4, "第四章 申请材料与附则"),
+        ("第七条 申请材料提交截止时间为当年 9 月 10 日 17:00。第十一条 评审结果公示无异议后，"
+         "奖学金于当年 11 月 30 日前发放至本人银行账户。", 3, "第三章 评审程序"),
+    ]
+    rules = [
+        # rule_code, rule_type, field_key, operator, expected, description
+        ("R-GPA", "eligibility", "gpa", "gte", "3.0", "学年平均学分绩点不低于 3.0"),
+        ("R-RANK", "eligibility", "rank_percent", "lte", "30", "专业排名位于前 30%"),
+        ("R-GRADE", "eligibility", "grade", "in", "[2, 3]", "限二年级及以上学生申请"),
+        ("R-POVERTY", "eligibility", "poverty_certified", "equals", "yes", "须经家庭经济困难认定"),
+        ("R-SUBJECTIVE", "restriction", None, "manual_review", None, "综合表现突出者优先考虑"),
+        ("R-MATERIAL", "material", None, None, None, "提交申请表、成绩单与认定告知书"),
+        ("R-DEADLINE", "deadline", None, None, "2026-09-10",
+         "申请材料提交截止时间为当年 9 月 10 日"),
+        ("R-PAYOUT", "deadline", None, None, None, "评审结果公示无异议后发放奖学金"),
+    ]
+
+    with app.app_context():
+        uploader = db.session.execute(
+            db.select(User.id).where(User.username == "admin")).scalar()
+        document = Document(
+            id=new_ulid(), title="（测试）本科生奖学金评审办法", file_name="policy.pdf",
+            stored_name="policy.pdf", file_type="pdf", file_size=2048,
+            parse_status="indexed", chunk_count=len(chunks), uploader_id=uploader,
+        )
+        db.session.add(document)
+        chunk_rows = []
+        for index, (content, page, section) in enumerate(chunks):
+            row = DocumentChunk(
+                id=new_ulid(), document_id=document.id, chunk_index=index,
+                content=content, char_start=index * 200, char_end=(index + 1) * 200,
+                page_number=page, section_title=section,
+            )
+            chunk_rows.append(row)
+            db.session.add(row)
+
+        rule_rows = []
+        # 先 flush：规则行引用 chunks.id，本文件没定义 relationship，
+        # 依赖 SQLAlchemy 的自动排序在这里不够稳，显式 flush 一次比排查 FK 报错便宜
+        db.session.flush()
+        for code, rule_type, field, operator, expected, description in rules:
+            row = PolicyRule(
+                id=new_ulid(), document_id=document.id, chunk_id=chunk_rows[0].id,
+                rule_code=code, rule_type=rule_type, description=description,
+                field_key=field, operator=operator, expected_value=expected,
+                original_quote=description, quote_verified=1,
+                extraction_status="suggested", review_status="approved",
+                confidence="high", page_or_section="第二章 申请条件",
+            )
+            rule_rows.append(row)
+            db.session.add(row)
+        db.session.commit()
+
+        ids = {
+            "document_id": document.id,
+            "chunk_ids": [c.id for c in chunk_rows],
+            "chunk_contents": [c.content for c in chunk_rows],
+            "rule_ids": [r.id for r in rule_rows],
+            "rule_codes": {r.rule_code: r.id for r in rule_rows},
+        }
+    return ids
