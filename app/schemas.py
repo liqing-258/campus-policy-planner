@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.errors import InvalidParam
 
@@ -79,3 +79,66 @@ def optional_date(raw: str | None, field: str = "published_at") -> date | None:
         return date.fromisoformat(raw.strip())
     except ValueError:
         raise InvalidParam(f"{field} 必须是 YYYY-MM-DD 格式")
+
+
+# ---------- M4：检索与问答 ----------
+class SearchRequest(StrictModel):
+    """纯检索（调试/演示）。"""
+
+    query: str = Field(min_length=1, max_length=300)
+    top_k: int = Field(default=6, ge=1, le=20)
+    document_ids: list[str] | None = None
+    # 显式传 0 可临时关掉拒答闸门，仅用于调试对照——正常问答不传
+    min_coverage: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class AskRequest(StrictModel):
+    """提问。conversation_id 为空则新建会话；带 scope_document_ids 可限定只在这些文件里找。"""
+
+    question: str = Field(min_length=1, max_length=500)
+    conversation_id: str | None = Field(default=None, max_length=26)
+    top_k: int = Field(default=6, ge=1, le=20)
+    scope_document_ids: list[str] | None = None
+
+
+class LlmAnswer(StrictModel):
+    """**模型输出的契约**（N-01 契约校验闸就守在这里）。
+
+    为什么用 pydantic 而不是手写 if：
+    - 模型返回 `cited: "1,2"`（字符串）、`confidence: "HIGH"`（大写）、多给一个 `explanation` 字段，
+      都属于常态。手写 if 只能挡住想得到的几种，pydantic 一次挡住全部形状问题。
+    - `extra="forbid"` 是故意的：模型自作主张加字段时，宁可让它重试一次，
+      也不要带着不确定字段往下走——下游引用校验依赖字段名精确。
+
+    字段含义：
+    - `answer`：给用户看的答案正文。**证据不足时应为空串**，并让 sufficient=false。
+    - `cited`：引用的片段编号（1-based），必须是候选列表里真实存在的编号。
+    - `sufficient`：模型自评证据是否足够。这是第二道拒答闸（第一道是覆盖率）。
+    - `confidence`：提示性字段，不参与判定，只用于前端着色。
+    """
+
+    answer: str = Field(default="", max_length=4000)
+    cited: list[int] = Field(default_factory=list, max_length=20)
+    sufficient: bool = True
+    confidence: str = Field(default="medium")
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _normalize_confidence(cls, value):
+        """大小写与非法值都归一，不让它把整条回答废掉——它只是提示字段。"""
+        if not isinstance(value, str):
+            return "medium"
+        lowered = value.strip().lower()
+        return lowered if lowered in ("high", "medium", "low") else "medium"
+
+    @field_validator("cited", mode="before")
+    @classmethod
+    def _drop_booleans(cls, value):
+        """`cited: [true]` 会被 pydantic 宽松模式转成 `[1]`，从而**误指到片段 1**。
+
+        这类"看起来合法的错误引用"比明显的越界更危险：它通得过类型校验，
+        用户却会看到一条根本不对应问题的出处。因此在进入校验前先滤掉布尔值。
+        """
+        if isinstance(value, list):
+            return [v for v in value if not isinstance(v, bool)]
+        return value

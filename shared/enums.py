@@ -66,3 +66,14 @@ SUPPORTED_EXTENSIONS = tuple(FILE_TYPE_BY_EXT)
 # 魔数：用于识别"改名的可执行文件"（T-01）
 MAGIC_PDF = b"%PDF-"
 MAGIC_ZIP = b"PK\x03\x04"      # docx 是 zip 容器
+
+# ---------- 检索模式（/health 的 embedding_mode 与问答响应的 mode 同源）----------
+EMBEDDING_VECTOR = "vector"        # 向量检索可用
+EMBEDDING_BM25_ONLY = "bm25_only"  # 仅关键词检索（未配置 embedding）
+EMBEDDING_DISABLED = "disabled"    # 完全不可用
+
+# ---------- 回答置信度（模型自评，非绝对可靠，仅作提示）----------
+CONFIDENCE_HIGH = "high"
+CONFIDENCE_MEDIUM = "medium"
+CONFIDENCE_LOW = "low"
+CONFIDENCE_VALUES = (CONFIDENCE_HIGH, CONFIDENCE_MEDIUM, CONFIDENCE_LOW)
