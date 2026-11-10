@@ -1,6 +1,29 @@
 import { defineStore } from 'pinia'
 import { api, getToken, setToken, type LoginResult, type User } from '../api/client'
 
+/**
+ * 用户信息也写进 localStorage（`zxx_user`）。
+ *
+ * 只存 token 是不够的：路由守卫在首次导航时就会跑，而 `restore()` 要等 App 挂载后
+ * 才异步完成。守卫这期间读到 user=null，会把管理员也当成非管理员踢回工作台。
+ * 存一份 user 让守卫有据可依；真权限仍由后端 403 决定，前端这一层只影响体验。
+ */
+const USER_KEY = 'zxx_user'
+
+function readCachedUser(): User | null {
+  try {
+    const raw = localStorage.getItem(USER_KEY)
+    return raw ? (JSON.parse(raw) as User) : null
+  } catch {
+    return null
+  }
+}
+
+function cacheUser(user: User | null): void {
+  if (user) localStorage.setItem(USER_KEY, JSON.stringify(user))
+  else localStorage.removeItem(USER_KEY)
+}
+
 interface AuthState {
   token: string | null
   user: User | null
@@ -11,7 +34,7 @@ interface AuthState {
 export const useAuthStore = defineStore('auth', {
   state: (): AuthState => ({
     token: getToken(),
-    user: null,
+    user: readCachedUser(),
     loading: false,
     error: '',
   }),
@@ -31,6 +54,7 @@ export const useAuthStore = defineStore('auth', {
         this.token = result.token
         this.user = result.user
         setToken(result.token)
+        cacheUser(result.user)
         return true
       } catch (err) {
         this.error = err instanceof Error ? err.message : '登录失败'
@@ -45,6 +69,7 @@ export const useAuthStore = defineStore('auth', {
       if (!this.token) return false
       try {
         this.user = await api.get<User>('/auth/me')
+        cacheUser(this.user)
         return true
       } catch {
         this.logout()
@@ -56,6 +81,7 @@ export const useAuthStore = defineStore('auth', {
       this.token = null
       this.user = null
       setToken(null)
+      cacheUser(null)
     },
   },
 })

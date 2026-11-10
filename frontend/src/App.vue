@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, setUnauthorizedHandler, type Health } from './api/client'
 import { useAuthStore } from './stores/auth'
@@ -23,6 +23,22 @@ function logout() {
   auth.logout()
   router.push({ name: 'login' })
 }
+
+/**
+ * 导航按角色过滤。规则管理只给管理员——但隐藏入口不是权限控制，
+ * 后端 `/documents/{id}/rules/extract` 与 `PATCH /rules/{id}` 都有 admin_required。
+ */
+const navItems = computed(() => {
+  const items = [
+    { to: '/', label: '工作台', hint: '总览' },
+    { to: '/library', label: '政策知识库', hint: 'M3' },
+    { to: '/ask', label: '智能问答', hint: 'M4' },
+    { to: '/match', label: '资格匹配', hint: 'M5' },
+    { to: '/plans', label: '计划与任务', hint: 'M5' },
+  ]
+  if (auth.isAdmin) items.push({ to: '/rules', label: '规则管理', hint: 'M5' })
+  return items
+})
 </script>
 
 <template>
@@ -37,27 +53,43 @@ function logout() {
       <div class="brand">
         <span class="dot" />
         <strong>知校</strong>
-        <span class="muted">校园政策理解与智能事务规划</span>
+        <span class="muted tagline">校园政策理解与智能事务规划</span>
       </div>
       <nav v-if="auth.isLoggedIn" class="nav">
-        <router-link to="/">工作台</router-link>
         <span class="muted">{{ auth.displayName }}（{{ auth.user?.role }}）</span>
         <button class="btn btn-ghost" @click="logout">退出</button>
       </nav>
     </header>
 
-    <main class="main">
-      <div v-if="healthError" class="card error-card">
-        <h3>后端未连接</h3>
-        <p class="muted">{{ healthError }}</p>
-        <p class="muted mono">请先运行：.venv\Scripts\python.exe server.py</p>
-      </div>
-      <router-view v-else />
-    </main>
+    <div class="body">
+      <aside v-if="auth.isLoggedIn && !healthError" class="sidenav">
+        <router-link
+          v-for="item in navItems"
+          :key="item.to"
+          :to="item.to"
+          class="nav-item"
+          active-class="active"
+          :exact-active-class="item.to === '/' ? 'active' : ''"
+        >
+          <span>{{ item.label }}</span>
+          <span class="nav-hint muted">{{ item.hint }}</span>
+        </router-link>
+      </aside>
+
+      <main class="main">
+        <div v-if="healthError" class="card error-card">
+          <h3>后端未连接</h3>
+          <p class="muted">{{ healthError }}</p>
+          <p class="muted mono">请先运行：.venv\Scripts\python.exe server.py</p>
+        </div>
+        <router-view v-else />
+      </main>
+    </div>
 
     <footer class="footer muted">
       v{{ health?.version ?? '—' }} · 模型 {{ health?.llm_mode ?? '—' }} ·
-      检索 {{ health?.embedding_mode ?? '—' }}
+      检索 {{ health?.embedding_mode ?? '—' }} ·
+      政策文件 {{ health?.document_count ?? '—' }} 份 / 片段 {{ health?.chunk_count ?? '—' }} 条
     </footer>
   </div>
 </template>
@@ -85,6 +117,9 @@ function logout() {
   padding: var(--space-3) var(--space-6);
   background: var(--c-surface);
   border-bottom: 1px solid var(--c-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .brand {
@@ -100,35 +135,95 @@ function logout() {
   background: var(--c-primary);
 }
 
+.tagline {
+  font-size: 13px;
+}
+
 .nav {
   display: flex;
   align-items: center;
   gap: var(--space-4);
 }
 
-.main {
+.body {
   flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
   width: 100%;
-  max-width: 1080px;
+  max-width: 1320px;
   margin: 0 auto;
   padding: var(--space-6);
+}
+
+.sidenav {
+  width: 176px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: 76px;
+}
+
+.nav-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  color: var(--c-text);
+  font-size: 14px;
+  border: 1px solid transparent;
+}
+
+.nav-item:hover {
+  background: var(--c-surface);
+}
+
+.nav-item.active {
+  background: var(--c-primary-weak);
+  border-color: #c9dcf5;
+  color: var(--c-primary);
+  font-weight: 500;
+}
+
+.nav-hint {
+  font-size: 11px;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
 }
 
 .footer {
   padding: var(--space-4) var(--space-6);
   font-size: 12px;
   text-align: center;
+  border-top: 1px solid var(--c-border);
 }
 
 .error-card {
   border-color: #f0dfae;
 }
 
-@media (max-width: 768px) {
-  .main {
+@media (max-width: 900px) {
+  .body {
+    flex-direction: column;
     padding: var(--space-4);
   }
-  .brand .muted {
+  .sidenav {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    position: static;
+  }
+  .nav-hint {
+    display: none;
+  }
+  .tagline {
     display: none;
   }
 }
