@@ -49,3 +49,6 @@ build/
 
 # M5 起：演示库手工备份（仅本机保留，不入库）
 data/*.db.bak*
+
+# vite 构建时在 frontend/ 下丢的临时配置文件（--outDir 跑完不自动清）
+frontend/vite.config.ts.timestamp-*
