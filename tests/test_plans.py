@@ -74,6 +74,41 @@ def test_draft_marks_material_rule_as_top_priority(client, student_headers, poli
     assert material and material[0]["priority"] == "P0"
 
 
+def test_month_day_without_year_keeps_due_null_but_says_why(app, client, student_headers, policy):
+    """「当年 9 月 10 日」——原文给了月日、没给年份。
+
+    2026-11-10 联调发现：演示库的奖学金办法原文明写「当年 9 月 10 日 17:00」，
+    生成的截止任务却是 due_at=None 且 note 写「政策原文未给出具体日期」——
+    后半句是错的，用户会以为系统没读到日期。
+
+    正确处理是**两件事分开**：日期仍然留空（不猜年份，9 月 10 日可能已过、
+    也可能指下一学年），但提示语要说出「原文给了 M 月 D 日，缺的是年份」。
+    """
+    from app.contract import new_ulid
+    from app.models import PolicyRule, db
+
+    with app.app_context():
+        row = PolicyRule(
+            id=new_ulid(), document_id=policy["document_id"], chunk_id=policy["chunk_ids"][0],
+            rule_code="R-YEARLESS", rule_type="deadline",
+            description="申请材料提交截止时间为当年 9 月 10 日 17:00",
+            expected_value="当年 9 月 10 日 17:00",
+            original_quote="申请材料提交截止时间为当年 9 月 10 日 17:00",
+            operator="manual_review", quote_verified=1,
+            extraction_status="suggested", review_status="approved",
+        )
+        db.session.add(row)
+        db.session.commit()
+
+    data = draft(client, student_headers, policy["document_id"])
+    task = next(t for t in data["tasks"] if t.get("source_rule_code") == "R-YEARLESS")
+
+    assert task["due_at"] is None, "缺年份时不许替用户决定是哪一年"
+    assert task["needs_human_confirmation"] is True
+    assert "9 月 10 日" in task["note"], "原文给了月日，提示语必须提到它"
+    assert "年份" in task["note"], "要说明缺的是年份，而不是缺日期"
+
+
 def test_draft_unknown_document_returns_2002(client, student_headers):
     resp = client.post(DRAFT, headers=student_headers, json={"document_id": new_ulid()})
     assert resp.status_code == 404
@@ -268,3 +303,46 @@ def test_plan_cannot_jump_to_confirmed_via_patch(client, student_headers, policy
                         json={"status": "confirmed"})
     assert resp.status_code in (400, 409)
     assert resp.get_json()["code"] in (1001, 2005)
+
+
+# ============================================================ 溯源（2026-11-10 补）
+def test_confirm_keeps_note_and_rule_trace(client, student_headers, policy):
+    """确认之后，任务必须还能回答两个问题：来自哪条规则、为什么缺日期。
+
+    2026-11-10 联调发现两处断链：
+    - `tasks` 表没有 note 列，草稿里那句「原文为 9 月 10 日、缺年份」在确认时蒸发，
+      前端只好写死「原文未给出日期」——对 R-14 来说这是假的。
+    - `source_rule_id` 从没写过，任务落库后查不回 policy_rules 的任何一行。
+
+    所以这里断言：确认 → 读回，溯源信息在。
+    """
+    draft_data = draft(client, student_headers, policy["document_id"])
+    payload = [
+        {
+            "temp_id": t["temp_id"],
+            "title": t["title"],
+            "description": t["description"],
+            "priority": t["priority"],
+            "due_at": t["due_at"],
+            "required_materials": t["required_materials"],
+            "dependency_ids": t["dependency_ids"],
+            "source_rule_code": t.get("source_rule_code"),
+            "due_source": t.get("due_source"),
+            "note": t.get("note"),
+            "needs_human_confirmation": t.get("needs_human_confirmation", False),
+        }
+        for t in draft_data["tasks"]
+    ]
+    plan_id = draft_data["plan_id"]
+    resp = confirm(client, student_headers, plan_id, payload)
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+
+    rows = client.get(f"/api/v1/tasks?plan_id={plan_id}&page=1&page_size=50",
+                      headers=student_headers).get_json()["data"]["items"]
+    deadline = next(r for r in rows if r["title"].startswith("注意截止时间"))
+    assert deadline["due_source"] == "rule", "有日期且来自规则时，来源必须记 rule 而不是 manual"
+    assert deadline["source_rule_id"], "必须能追回是哪条规则生成的"
+
+    material = next(r for r in rows if r["title"].startswith("准备材料"))
+    assert material["source_rule_id"], "材料类任务也要能追回规则"
+

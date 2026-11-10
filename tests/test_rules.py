@@ -184,10 +184,28 @@ def test_list_rules_filters_by_review_status(client, student_headers, policy):
     assert data["total"] == 0
 
 
-def test_approve_requires_operator(client, admin_headers, policy):
-    """复核通过一条没有算子的规则 = 让一条无法求值的规则进匹配，必须拦住。"""
-    subjective = policy["rule_codes"]["R-SUBJECTIVE"]
-    resp = client.patch(f"/api/v1/rules/{subjective}", headers=admin_headers,
+def test_approve_requires_operator(app, client, admin_headers, policy):
+    """复核通过一条没有算子的**条件类**规则 = 让一条无法求值的规则进匹配，必须拦住。
+
+    注意不能用夹具里的 R-SUBJECTIVE：它有 `manual_review` 算子，
+    正是"无法自动判定"的合法表达方式（T-14 靠它）。真正该拦的是
+    "eligibility 类 + 没有任何算子"——那才是漏抽了算子。
+    """
+    from app.contract import new_ulid
+    from app.models import PolicyRule, db
+
+    with app.app_context():
+        bare = PolicyRule(
+            id=new_ulid(), document_id=policy["document_id"], chunk_id=policy["chunk_ids"][0],
+            rule_code="R-BARE", rule_type="eligibility", description="学习成绩良好",
+            original_quote="学习成绩良好", quote_verified=1,
+            extraction_status="suggested", review_status="needs_review",
+        )
+        db.session.add(bare)
+        db.session.commit()
+        bare_id = bare.id
+
+    resp = client.patch(f"/api/v1/rules/{bare_id}", headers=admin_headers,
                         json={"review_status": "approved"})
     assert resp.status_code == 422
     assert resp.get_json()["code"] == 1003
