@@ -16,7 +16,12 @@ FILE_TYPE_UNSUPPORTED = 1005  # 415 类型不支持
 
 DOCUMENT_DUPLICATED = 2001   # 409 文档已存在
 DOCUMENT_NOT_FOUND = 2002    # 404 文档不存在
+RULE_NOT_FOUND = 2003        # 404 规则不存在
+PLAN_NOT_FOUND = 2004        # 404 计划/任务不存在
+STATE_TRANSITION_INVALID = 2005  # 409 状态转移非法
+DEPENDENCY_CYCLE = 2006      # 409 任务依赖成环
 PARSE_IN_PROGRESS = 2007     # 409 解析进行中
+RULES_NOT_READY = 2008       # 200 没有已复核规则，无法匹配（业务态）
 
 UNAUTHENTICATED = 3001       # 401 未登录或令牌过期
 FORBIDDEN = 3002             # 403 无权限
@@ -33,7 +38,9 @@ INTERNAL_ERROR = 9001        # 500 未预期异常
 DB_UNAVAILABLE = 9002        # 503 数据库不可用
 
 # 业务态错误码：HTTP 必须 200，前端按 code 渲染提示卡而非报错
-BUSINESS_STATE_CODES = frozenset({INSUFFICIENT_EVIDENCE, CITATION_REJECTED, DEGRADED_MODE})
+BUSINESS_STATE_CODES = frozenset({
+    INSUFFICIENT_EVIDENCE, CITATION_REJECTED, DEGRADED_MODE, RULES_NOT_READY,
+})
 
 # ---------- 业务码 → HTTP 状态 ----------
 CODE_HTTP: dict[int, int] = {
@@ -45,7 +52,12 @@ CODE_HTTP: dict[int, int] = {
     FILE_TYPE_UNSUPPORTED: 415,
     DOCUMENT_DUPLICATED: 409,
     DOCUMENT_NOT_FOUND: 404,
+    RULE_NOT_FOUND: 404,
+    PLAN_NOT_FOUND: 404,
+    STATE_TRANSITION_INVALID: 409,
+    DEPENDENCY_CYCLE: 409,
     PARSE_IN_PROGRESS: 409,
+    RULES_NOT_READY: 200,
     UNAUTHENTICATED: 401,
     FORBIDDEN: 403,
     INSUFFICIENT_EVIDENCE: 200,
@@ -68,7 +80,12 @@ CODE_MESSAGES: dict[int, str] = {
     FILE_TYPE_UNSUPPORTED: "文件类型不支持",
     DOCUMENT_DUPLICATED: "文档已存在",
     DOCUMENT_NOT_FOUND: "文档不存在",
+    RULE_NOT_FOUND: "规则不存在",
+    PLAN_NOT_FOUND: "计划或任务不存在",
+    STATE_TRANSITION_INVALID: "状态转移非法",
+    DEPENDENCY_CYCLE: "任务依赖成环，无法确认计划",
     PARSE_IN_PROGRESS: "解析进行中，请稍后再试",
+    RULES_NOT_READY: "该文件还没有已复核的规则，无法匹配；请管理员先抽取并复核规则",
     UNAUTHENTICATED: "未登录或登录已过期",
     FORBIDDEN: "没有权限执行该操作",
     INSUFFICIENT_EVIDENCE: "未在政策库中找到足够依据，无法给出可靠回答",

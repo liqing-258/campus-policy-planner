@@ -142,3 +142,203 @@ class LlmAnswer(StrictModel):
         if isinstance(value, list):
             return [v for v in value if not isinstance(v, bool)]
         return value
+
+
+# ============================================================ M5：规则 / 匹配 / 计划 / 任务
+def _check_in(value: str | None, allowed: tuple[str, ...], label: str) -> str | None:
+    """把"取值不在白名单"翻译成 1001，而不是让 pydantic 报一个用户看不懂的类型错误。
+
+    用校验器而不是 Literal：白名单是 shared/enums.py 里的一份定义，
+    用 Literal 就得在这里再抄一遍——两份清单早晚会不一致。
+    """
+    if value is None:
+        return value
+    if value not in allowed:
+        raise ValueError(f"{label}必须是 {'/'.join(allowed)} 之一")
+    return value
+
+
+class ExtractRequest(StrictModel):
+    """规则抽取入参。不传 chunk_ids 表示整篇抽取。"""
+
+    chunk_ids: list[str] | None = Field(default=None, max_length=200)
+    max_rules_per_chunk: int = Field(default=8, ge=1, le=20)
+
+
+class ExtractedRule(StrictModel):
+    """模型输出的一条规则。**字段类型全部宽松**，逐条合法性由服务层判定。
+
+    为什么不在这里用 Literal 卡死 operator：一条规则算子写错，应该丢掉这一条并告诉
+    用户"第 3 条算子不认识"，而不是让整次抽取因为一条脏数据全盘失败。
+    """
+
+    chunk_index: int
+    rule_code: str = Field(min_length=1, max_length=32)
+    rule_type: str = Field(min_length=1, max_length=24)
+    description: str = Field(min_length=1, max_length=500)
+    field_key: str | None = Field(default=None, max_length=64)
+    operator: str | None = Field(default=None, max_length=20)
+    expected_value: str | None = Field(default=None, max_length=200)
+    target_group: str | None = Field(default=None, max_length=64)
+    required_information: str | None = Field(default=None, max_length=500)
+    effective_period: str | None = Field(default=None, max_length=64)
+    page_or_section: str | None = Field(default=None, max_length=100)
+    original_quote: str = Field(min_length=1, max_length=1000)
+    confidence: str | None = Field(default=None, max_length=12)
+
+
+class RuleExtractionPayload(StrictModel):
+    rules: list[ExtractedRule] = Field(default_factory=list)
+
+
+class RulePatch(StrictModel):
+    """管理员修正规则。全部可选，至少给一个字段。"""
+
+    rule_type: str | None = None
+    description: str | None = Field(default=None, max_length=500)
+    field_key: str | None = None
+    operator: str | None = None
+    expected_value: str | None = Field(default=None, max_length=200)
+    target_group: str | None = Field(default=None, max_length=64)
+    required_information: str | None = Field(default=None, max_length=500)
+    effective_period: str | None = Field(default=None, max_length=64)
+    review_status: str | None = None
+
+    @field_validator("rule_type")
+    @classmethod
+    def _rule_type(cls, value):
+        from shared.enums import RULE_TYPES
+        return _check_in(value, RULE_TYPES, "规则类型")
+
+    @field_validator("operator")
+    @classmethod
+    def _operator(cls, value):
+        from shared.enums import RULE_OPERATORS
+        return _check_in(value, RULE_OPERATORS, "算子")
+
+    @field_validator("field_key")
+    @classmethod
+    def _field_key(cls, value):
+        from shared.enums import RULE_FIELD_KEYS
+        return _check_in(value, RULE_FIELD_KEYS, "画像字段")
+
+    @field_validator("review_status")
+    @classmethod
+    def _review_status(cls, value):
+        from shared.enums import REVIEW_STATUSES
+        return _check_in(value, REVIEW_STATUSES, "复核状态")
+
+
+class Profile(StrictModel):
+    """学生画像。**字段全部可选**：缺字段是正常情况（对应 unknown/missing_info），
+
+    不是错误——逼用户填齐所有字段才给匹配，等于把"信息不足"这个真实场景藏起来。
+    白名单外字段一律 1001：见 shared/enums.py 里 PROFILE_FIELDS 的注释。
+    """
+
+    student_type: str | None = Field(default=None, max_length=64)
+    grade: int | None = Field(default=None, ge=1, le=8)
+    gpa: float | None = Field(default=None, ge=0, le=5)
+    rank_percent: float | None = Field(default=None, ge=0, le=100)
+    disciplinary_record: str | None = Field(default=None, max_length=64)
+    poverty_certified: str | None = Field(default=None, max_length=16)
+    major: str | None = Field(default=None, max_length=128)
+    credits_earned: int | None = Field(default=None, ge=0, le=500)
+    enrollment_status: str | None = Field(default=None, max_length=32)
+
+
+class MatchRequest(StrictModel):
+    document_id: str = Field(min_length=1, max_length=26)
+    profile: Profile = Field(default_factory=Profile)
+
+
+class PlanDraftRequest(StrictModel):
+    document_id: str = Field(min_length=1, max_length=26)
+    match_session_id: str | None = Field(default=None, max_length=26)
+
+
+class DraftTaskInput(StrictModel):
+    """确认计划时前端回传的任务。临时 ID 只在本次请求内有效。
+
+    `source_rule_code` / `due_source` / `note` / `needs_human_confirmation` 是草稿
+    自带的溯源元数据，原样回存。它们只影响"这条任务从哪来、为什么缺日期"的展示，
+    不参与任何资格判定——改它们不会让不符合条件的人通过匹配。
+    """
+
+    temp_id: str = Field(min_length=1, max_length=8)
+    title: str = Field(min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=2000)
+    priority: str = "P2"
+    due_at: str | None = None
+    required_materials: str | None = Field(default=None, max_length=1000)
+    dependency_ids: list[str] = Field(default_factory=list, max_length=50)
+    source_rule_code: str | None = Field(default=None, max_length=32)
+    due_source: str | None = Field(default=None, max_length=12)
+    note: str | None = Field(default=None, max_length=500)
+    needs_human_confirmation: bool = False
+
+    @field_validator("priority")
+    @classmethod
+    def _priority(cls, value):
+        from shared.enums import PRIORITIES
+        return _check_in(value, PRIORITIES, "优先级")
+
+    @field_validator("due_source")
+    @classmethod
+    def _due_source(cls, value):
+        return _check_in(value, ("rule", "manual"), "日期来源")
+
+
+class PlanConfirmRequest(StrictModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    tasks: list[DraftTaskInput] = Field(default_factory=list, max_length=50)
+
+
+class PlanPatchRequest(StrictModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    status: str | None = None
+
+    @field_validator("status")
+    @classmethod
+    def _status(cls, value):
+        from shared.enums import PLAN_STATUSES
+        return _check_in(value, PLAN_STATUSES, "计划状态")
+
+
+class TaskCreateRequest(StrictModel):
+    plan_id: str = Field(min_length=1, max_length=26)
+    title: str = Field(min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=2000)
+    priority: str = "P2"
+    due_at: str | None = None
+    required_materials: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("priority")
+    @classmethod
+    def _priority(cls, value):
+        from shared.enums import PRIORITIES
+        return _check_in(value, PRIORITIES, "优先级")
+
+
+class TaskPatchRequest(StrictModel):
+    title: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=2000)
+    priority: str | None = None
+    due_at: str | None = None
+    required_materials: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("priority")
+    @classmethod
+    def _priority(cls, value):
+        from shared.enums import PRIORITIES
+        return _check_in(value, PRIORITIES, "优先级")
+
+
+class TaskStatusRequest(StrictModel):
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def _status(cls, value):
+        from shared.enums import TASK_STATUSES
+        return _check_in(value, TASK_STATUSES, "任务状态")

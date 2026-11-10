@@ -77,3 +77,115 @@ CONFIDENCE_HIGH = "high"
 CONFIDENCE_MEDIUM = "medium"
 CONFIDENCE_LOW = "low"
 CONFIDENCE_VALUES = (CONFIDENCE_HIGH, CONFIDENCE_MEDIUM, CONFIDENCE_LOW)
+
+
+# ---------- M5：规则类型与算子（数据模型 §4.2、说明书 §4.4）----------
+RULE_ELIGIBILITY = "eligibility"
+RULE_MATERIAL = "material"
+RULE_DEADLINE = "deadline"
+RULE_PROCESS = "process"
+RULE_RESTRICTION = "restriction"
+RULE_TYPES = (RULE_ELIGIBILITY, RULE_MATERIAL, RULE_DEADLINE, RULE_PROCESS, RULE_RESTRICTION)
+
+# 只有这两类参与"资格三态判定"，其余三类用于生成计划任务。
+# 混在一起统计会让"材料清单"被算成"不符合条件"，这是口径错误不是设计选择。
+CONDITION_RULE_TYPES = (RULE_ELIGIBILITY, RULE_RESTRICTION)
+
+OP_EQUALS = "equals"
+OP_NOT_EQUALS = "not_equals"
+OP_IN = "in"
+OP_GTE = "gte"
+OP_LTE = "lte"
+OP_EXISTS = "exists"
+OP_CONTAINS_ANY = "contains_any"
+OP_MANUAL_REVIEW = "manual_review"
+RULE_OPERATORS = (
+    OP_EQUALS, OP_NOT_EQUALS, OP_IN, OP_GTE, OP_LTE,
+    OP_EXISTS, OP_CONTAINS_ANY, OP_MANUAL_REVIEW,
+)
+# 需要 expected_value 才能求值的算子；缺了就判 ambiguous
+NEEDS_EXPECTED = (OP_EQUALS, OP_NOT_EQUALS, OP_IN, OP_GTE, OP_LTE, OP_CONTAINS_ANY)
+
+# ---------- 复核状态 ----------
+REVIEW_NEEDS = "needs_review"
+REVIEW_APPROVED = "approved"
+REVIEW_REJECTED = "rejected"
+REVIEW_STATUSES = (REVIEW_NEEDS, REVIEW_APPROVED, REVIEW_REJECTED)
+
+EXTRACT_SUGGESTED = "suggested"
+EXTRACT_VERIFIED = "verified"
+EXTRACTION_STATUSES = (EXTRACT_SUGGESTED, EXTRACT_VERIFIED)
+
+# ---------- 三态匹配 ----------
+MATCH_MET = "met"
+MATCH_NOT_MET = "not_met"
+MATCH_UNKNOWN = "unknown"
+MATCH_STATUSES = (MATCH_MET, MATCH_NOT_MET, MATCH_UNKNOWN)
+
+UNKNOWN_MISSING_INFO = "missing_info"
+UNKNOWN_AMBIGUOUS_RULE = "ambiguous_rule"
+UNKNOWN_NO_EVIDENCE = "no_evidence"
+UNKNOWN_CONFLICTING = "conflicting_policy"
+UNKNOWN_REASONS = (
+    UNKNOWN_MISSING_INFO, UNKNOWN_AMBIGUOUS_RULE, UNKNOWN_NO_EVIDENCE, UNKNOWN_CONFLICTING,
+)
+
+# ---------- 计划状态 ----------
+PLAN_DRAFT = "draft"
+PLAN_CONFIRMED = "confirmed"
+PLAN_ARCHIVED = "archived"
+PLAN_REJECTED = "rejected"
+PLAN_STATUSES = (PLAN_DRAFT, PLAN_CONFIRMED, PLAN_ARCHIVED, PLAN_REJECTED)
+
+# 确认只能走 /plans/{id}/confirm（那里才校验依赖与幂等），
+# 因此 PATCH 白名单里没有 draft -> confirmed 这条边。
+PLAN_TRANSITIONS: dict[str, tuple[str, ...]] = {
+    PLAN_DRAFT: (PLAN_ARCHIVED,),
+    PLAN_CONFIRMED: (PLAN_ARCHIVED,),
+    PLAN_ARCHIVED: (),
+    PLAN_REJECTED: (),
+}
+
+
+def is_plan_transition_allowed(current: str, target: str) -> bool:
+    return target in PLAN_TRANSITIONS.get(current, ())
+
+
+# ---------- 任务状态 ----------
+TASK_TODO = "todo"
+TASK_DOING = "doing"
+TASK_DONE = "done"
+TASK_DEFERRED = "deferred"
+TASK_CANCELLED = "cancelled"
+TASK_STATUSES = (TASK_TODO, TASK_DOING, TASK_DONE, TASK_DEFERRED, TASK_CANCELLED)
+
+TASK_TRANSITIONS: dict[str, tuple[str, ...]] = {
+    TASK_TODO: (TASK_DOING, TASK_DONE, TASK_DEFERRED, TASK_CANCELLED),
+    TASK_DOING: (TASK_DONE, TASK_DEFERRED, TASK_CANCELLED),
+    TASK_DEFERRED: (TASK_TODO, TASK_CANCELLED),
+    # 撤销完成只能回到 todo：允许 done -> doing 会让"完成时间"变得无法解释
+    TASK_DONE: (TASK_TODO,),
+    TASK_CANCELLED: (),
+}
+
+
+def is_task_transition_allowed(current: str, target: str) -> bool:
+    return target in TASK_TRANSITIONS.get(current, ())
+
+
+PRIORITY_P0 = "P0"
+PRIORITY_P1 = "P1"
+PRIORITY_P2 = "P2"
+PRIORITY_P3 = "P3"
+PRIORITIES = (PRIORITY_P0, PRIORITY_P1, PRIORITY_P2, PRIORITY_P3)
+
+# ---------- 画像字段白名单（数据模型 §4.4）----------
+# 模型与前端都不得引入白名单外的字段：`family_income`、`id_card` 这类字段
+# 一旦入库，就是"多采集了一份个人信息"，删库都不算挽回。
+PROFILE_FIELDS = (
+    "student_type", "grade", "gpa", "rank_percent", "disciplinary_record",
+    "poverty_certified", "major", "credits_earned", "enrollment_status",
+)
+
+# 规则抽取里允许出现的 field_key（与上面同一白名单，单独命名便于阅读）
+RULE_FIELD_KEYS = PROFILE_FIELDS

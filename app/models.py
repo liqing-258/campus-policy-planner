@@ -286,6 +286,10 @@ class Task(db.Model):
     source_rule_id = db.Column(db.String(26), db.ForeignKey("policy_rules.id"))
     needs_human_confirmation = db.Column(db.Integer, nullable=False, default=0)
     dependency_ids = db.Column(db.Text)
+    # 草稿里那句「为什么截止日期是空的 / 需要人工确认什么」必须跟着任务走。
+    # 没有这一列时，确认后的任务只剩 due_at=NULL，前端只好写死「原文未给出日期」——
+    # 而真实政策写的是「当年 9 月 10 日」，只是缺年份，那句写死的提示是错的。
+    note = db.Column(db.String(500))
     sort_order = db.Column(db.Integer, nullable=False, default=0)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)

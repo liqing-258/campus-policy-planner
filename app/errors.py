@@ -84,6 +84,29 @@ class ParseInProgress(ApiError):
     code = codes.PARSE_IN_PROGRESS
 
 
+# ---------- M5：规则 / 匹配 / 计划 / 任务 ----------
+class RuleNotFound(ApiError):
+    code = codes.RULE_NOT_FOUND
+
+
+class PlanNotFound(ApiError):
+    code = codes.PLAN_NOT_FOUND
+
+
+class StateTransitionInvalid(ApiError):
+    code = codes.STATE_TRANSITION_INVALID
+
+
+class DependencyCycle(ApiError):
+    code = codes.DEPENDENCY_CYCLE
+
+
+class RulesNotReady(ApiError):
+    """有文档但没有任何已复核规则。业务态：HTTP 200，不是错误。"""
+
+    code = codes.RULES_NOT_READY
+
+
 # ---------- 权限 ----------
 class Unauthenticated(ApiError):
     code = codes.UNAUTHENTICATED
