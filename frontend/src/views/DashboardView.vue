@@ -186,8 +186,8 @@ const confirmedPlans = computed(() => plans.value.filter((p) => p.status === 'co
 
       <section class="card">
         <div class="list-head">
-          <h3>任务分布</h3>
-          <span class="muted tiny">来自 /tasks/stats</span>
+          <h3>我的任务分布</h3>
+          <span class="muted tiny">来自 /tasks/stats（按当前账号统计）</span>
         </div>
         <template v-if="stats">
           <div class="stat-row">
@@ -208,18 +208,24 @@ const confirmedPlans = computed(() => plans.value.filter((p) => p.status === 'co
               <span class="muted tiny">完成率（不含已取消）</span>
             </div>
           </div>
-          <ul class="bars">
-            <li v-for="bar in statusBars" :key="bar.status">
-              <span class="bar-label">{{ bar.label }}</span>
-              <span class="bar-track">
-                <span :class="['bar-fill', bar.status]" :style="{ width: `${bar.percent}%` }" />
-              </span>
-              <span class="bar-count mono">{{ bar.count }}</span>
-            </li>
-          </ul>
-          <p class="muted tiny">
-            计划：草稿 {{ stats.plans.draft ?? 0 }} · 已确认 {{ stats.plans.confirmed ?? 0 }} ·
-            已归档 {{ stats.plans.archived ?? 0 }}
+          <template v-if="stats.total > 0">
+            <ul class="bars">
+              <li v-for="bar in statusBars" :key="bar.status">
+                <span class="bar-label">{{ bar.label }}</span>
+                <span class="bar-track">
+                  <span :class="['bar-fill', bar.status]" :style="{ width: `${bar.percent}%` }" />
+                </span>
+                <span class="bar-count mono">{{ bar.count }}</span>
+              </li>
+            </ul>
+            <p class="muted tiny">
+              计划：草稿 {{ stats.plans.draft ?? 0 }} · 已确认 {{ stats.plans.confirmed ?? 0 }} ·
+              已归档 {{ stats.plans.archived ?? 0 }}
+            </p>
+          </template>
+          <p v-else class="muted small empty-tasks">
+            这个账号名下还没有任务。任务由「资格匹配 → 生成计划 → 确认」产生；
+            管理员账号不办理学生事务，看到 0 是正常的——换成 student 登录就能看到演示任务。
           </p>
         </template>
         <p v-else class="muted small">{{ loading ? '读取中…' : '未取到统计' }}</p>
@@ -418,6 +424,13 @@ const confirmedPlans = computed(() => plans.value.filter((p) => p.status === 'co
 }
 
 /* ---------- M6：任务分布 ---------- */
+.empty-tasks {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3);
+  border: 1px dashed var(--c-border);
+  border-radius: var(--radius-control);
+  line-height: 1.7;
+}
 .stat-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
