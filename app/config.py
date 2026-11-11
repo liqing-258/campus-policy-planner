@@ -67,7 +67,7 @@ class Settings:
         self.host = _str("HOST", "127.0.0.1")
         self.port = _int("PORT", 5000)
         # 版本号随里程碑前进：M2 = 0.2.0，M3 = 0.3.0，M4 = 0.4.0，以此类推
-        self.version = _str("APP_VERSION", "0.5.0")
+        self.version = _str("APP_VERSION", "0.6.0")
 
         # --- 数据库 ---
         self.database_url = _str("DATABASE_URL", "sqlite:///./data/app.db")

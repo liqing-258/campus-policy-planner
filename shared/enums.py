@@ -189,3 +189,72 @@ PROFILE_FIELDS = (
 
 # 规则抽取里允许出现的 field_key（与上面同一白名单，单独命名便于阅读）
 RULE_FIELD_KEYS = PROFILE_FIELDS
+
+
+# ============================================================ M6：工作流与反馈
+# ---------- 六节点（设计说明书 §7.6）----------
+# 六个节点是**跨链路的总视图**，不是"每次提问都跑六个"。
+# 一次问答真正走 intent → retrieval → analysis → validation；
+# matching 与 planning 只在带画像 / 生成计划时执行，其余情况记为 skipped。
+# 这一点必须显式建模：把没执行的节点画成绿色的"已完成"，比不画更糟。
+NODE_INTENT = "intent"
+NODE_RETRIEVAL = "retrieval"
+NODE_ANALYSIS = "analysis"
+NODE_MATCHING = "matching"
+NODE_PLANNING = "planning"
+NODE_VALIDATION = "validation"
+
+NODE_ORDER = (
+    NODE_INTENT, NODE_RETRIEVAL, NODE_ANALYSIS,
+    NODE_MATCHING, NODE_PLANNING, NODE_VALIDATION,
+)
+
+NODE_LABELS = {
+    NODE_INTENT: "意图识别",
+    NODE_RETRIEVAL: "证据检索",
+    NODE_ANALYSIS: "政策分析",
+    NODE_MATCHING: "三态匹配",
+    NODE_PLANNING: "计划生成",
+    NODE_VALIDATION: "结果校验",
+}
+
+# ---------- 节点状态 ----------
+NODE_OK = "succeeded"
+NODE_DEGRADED = "degraded"
+NODE_FAILED = "failed"
+NODE_SKIPPED = "skipped"
+NODE_STATUSES = (NODE_OK, NODE_DEGRADED, NODE_FAILED, NODE_SKIPPED)
+
+# ---------- 运行状态（与设计 §7.6 的 workflow_runs.status 对齐）----------
+RUN_RUNNING = "running"
+RUN_SUCCEEDED = "succeeded"
+RUN_DEGRADED = "degraded"
+RUN_FAILED = "failed"
+RUN_STATUSES = (RUN_RUNNING, RUN_SUCCEEDED, RUN_DEGRADED, RUN_FAILED)
+
+RUN_TYPES = ("qa", "match", "plan")
+
+# ---------- 运行结果 ----------
+# status 说"这次跑完没有"，outcome 说"跑完是什么结果"。
+# 拒答 = 跑成功了，只是正确答案是"不能答"——所以它必须能和 failed 区分开。
+OUTCOME_ANSWERED = "answered"
+OUTCOME_REFUSED = "refused"
+OUTCOME_CITATION_REJECTED = "citation_rejected"
+OUTCOME_DEGRADED = "degraded"
+OUTCOME_FAILED = "failed"
+OUTCOMES = (
+    OUTCOME_ANSWERED, OUTCOME_REFUSED, OUTCOME_CITATION_REJECTED,
+    OUTCOME_DEGRADED, OUTCOME_FAILED,
+)
+
+# ---------- 答案反馈 ----------
+# 只收枚举码，不收自由文本当唯一信息：自由文本没法统计"哪一类问题最多"。
+FEEDBACK_WRONG_FACT = "wrong_fact"
+FEEDBACK_MISSING_CITATION = "missing_citation"
+FEEDBACK_OUTDATED_POLICY = "outdated_policy"
+FEEDBACK_TOO_VAGUE = "too_vague"
+FEEDBACK_OTHER = "other"
+FEEDBACK_REASONS = (
+    FEEDBACK_WRONG_FACT, FEEDBACK_MISSING_CITATION, FEEDBACK_OUTDATED_POLICY,
+    FEEDBACK_TOO_VAGUE, FEEDBACK_OTHER,
+)

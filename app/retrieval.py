@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from app import injection, versions
 from app.indexing import ensure_index_loaded, get_index
 from app.runtime import current_settings
 from shared.enums import EMBEDDING_BM25_ONLY, EMBEDDING_VECTOR
@@ -38,6 +39,11 @@ class Candidate:
     score: float
     coverage: float
     matched_terms: tuple[str, ...] = ()
+    # 疑似提示注入的命中模式（M6 / T-11）。空元组 = 没发现疑点。
+    injection_hits: tuple[dict, ...] = ()
+    # 降权前的覆盖率。只有命中注入模式时才有值——否则 `coverage` 就是原值，
+    # 多存一个字段只会让人怀疑"是不是还有别的地方也在改分数"。
+    raw_coverage: float | None = None
 
     def to_public(self, *, with_content: bool = True) -> dict:
         """对外序列化。内容可截断——列表场景不需要整段正文，详情接口才需要。"""
@@ -51,6 +57,14 @@ class Candidate:
             "score": self.score,
             "coverage": self.coverage,
         }
+        if self.injection_hits:
+            payload["injection"] = {
+                "suspected": True,
+                "hits": list(self.injection_hits),
+                "original_coverage": self.raw_coverage,
+                "weight": injection.INJECTION_WEIGHT,
+                "note": "该片段含指令式文字，已按系数降权；它仍可能是政策原文，请核对后再采信",
+            }
         if with_content:
             payload["content"] = self.content
         return payload
@@ -68,6 +82,9 @@ class RetrievalOutcome:
     min_coverage: float = 0.0
     top_coverage: float | None = None
     index_size: int = 0
+    # M6：同一主题的多版本（T-12）与疑似注入汇总（T-11）
+    conflicts: list[dict] = field(default_factory=list)
+    injection_suspected: list[dict] = field(default_factory=list)
 
     def to_public(self, *, with_content: bool = True) -> dict:
         return {
@@ -78,6 +95,8 @@ class RetrievalOutcome:
             "index_size": self.index_size,
             "refused": self.refused,
             "refuse_reason": self.refuse_reason,
+            "conflicts": self.conflicts,
+            "injection_suspected": self.injection_suspected,
         }
 
 
@@ -130,6 +149,10 @@ def retrieve(query: str, *, top_k: int | None = None,
     passed: list[Candidate] = []
     rejected: list[Candidate] = []
     for position, hit in enumerate(hits, 1):
+        found = injection.scan(hit.content)
+        # 疑似注入就降权，而不是丢弃：高相关片段（≥0.8）降权后仍在阈值之上，
+        # 它会带着标记进入证据块——这样既没隐藏政策原文，又让拦截动作可见。
+        coverage = injection.downweight(hit.coverage) if found else hit.coverage
         candidate = Candidate(
             index=position,
             chunk_id=hit.chunk_id,
@@ -139,10 +162,21 @@ def retrieve(query: str, *, top_k: int | None = None,
             page_number=hit.page_number,
             section_title=hit.section_title,
             score=hit.score,
-            coverage=hit.coverage,
+            coverage=coverage,
             matched_terms=tuple(hit.matched_terms),
+            injection_hits=tuple(found),
+            raw_coverage=hit.coverage if found else None,
         )
-        if hit.coverage >= threshold:
+        if found:
+            outcome.injection_suspected.append({
+                "chunk_id": hit.chunk_id,
+                "document_title": hit.document_title,
+                "patterns": [h["code"] for h in found],
+                "original_coverage": round(hit.coverage, 4),
+                "adjusted_coverage": coverage,
+                "kept": coverage >= threshold,
+            })
+        if coverage >= threshold:
             passed.append(candidate)
         else:
             rejected.append(candidate)
@@ -159,4 +193,8 @@ def retrieve(query: str, *, top_k: int | None = None,
             f"命中 {outcome.total_hits} 条片段，但最高关键词覆盖率仅 "
             f"{outcome.top_coverage:.2f}，低于阈值 {threshold}，判为主题不相关"
         )
+
+    # 版本冲突在闸门之后判：被拒答时也要带上（"你问的这个主题库里有 2025 版"），
+    # 所以候选为空时退回用被拦下的片段来判。
+    outcome.conflicts = versions.detect(outcome.candidates or outcome.rejected)
     return outcome
