@@ -615,6 +615,128 @@ M4 结项后用户回了一句"继续"，我把它解释成"进入 M5"，直接�
 
 ---
 
+## 4.7 M6 追加提交（体验与质量：三期"绿了也不算完"）
+
+M6 共 **16 次提交**（79–94），单次 1–6 个文件。计划里写的是 8–12 次，**实际 16 次**，
+超出上限的两条原因写在 §4.7.3。
+
+| # | 短哈希 | type(scope) | 摘要 | 文件 | +/− |
+| --- | --- | --- | --- | --- | --- |
+| 79 | `27152bd` | feat(workflows) | record what actually ran, and say so when a node did not | 4 | +686/−0 |
+| 80 | `17feb1c` | feat(qa) | trace the pipeline, keep the trace when the answer is refused | 6 | +457/−42 |
+| 81 | `44e9c41` | feat(documents) | let an admin fix version metadata without re-uploading | 5 | +226/−3 |
+| 82 | `02cc825` | test(m6) | 42 cases for the trace, the injection gate and version detection | 4 | +691/−0 |
+| 83 | `815c5cc` | test(m6) | feedback, task stats and multi-turn history | 3 | +391/−0 |
+| 84 | `a761a5c` | test(documents,matching) | metadata patch and award filtering | 2 | +186/−0 |
+| 85 | `1d8a814` | feat(ui/types) | model workflows, injection, conflicts and stats in the client | 2 | +222/−0 |
+| 86 | `854dcc3` | feat(ui/ask) | show the six-node trace, the version conflict and the injection panel | 1 | +449/−25 |
+| 87 | `7bb7627` | feat(ui) | task distribution, version metadata editing and the award selector | 3 | +836/−368 |
+| 88 | `05f1206` | tools(demo) | add a 2025 edition so the version conflict can actually be seen | 3 | +217/−9 |
+| 89 | `ad2b275` | docs(design) | v1.6 — two gates turn green, one semantic gets written down | 2 | +1951/−1919 |
+| 90 | `7ae02fc` | docs(data-model,runbook) | the trace envelope, and how to reproduce M6 by hand | 2 | +1321/−1215 |
+| 91 | `21a8c3e` | docs(qa) | test report and security self-check, with the red runs kept in | 2 | +481/−0 |
+| 92 | `58797eb` | docs(limits) | 22 known limits in one place, plus the M6 collaboration record | 2 | +522/−0 |
+| 93 | `4f3f399` | docs(readme) | v0.6.0 — 31 routes, 222 tests, and the three gates of M6 | 1 | +921/−897 |
+| 94 | `6f05b0b` | chore(docs) | normalize eight files back to lf, and stop the same accident recurring | 9 | +5481/−5460 |
+
+**净变更（唯一可信的数字）**：
+
+```
+$ git diff --shortstat 2ca5795 HEAD
+ 43 files changed, 5272 insertions(+), 172 deletions(-)
+```
+
+> **表里第 89–94 的数字是虚高的**，原因与 M5 §4.6 完全一致：用 Python 的
+> `open(..., "w")` 在 Windows 上写文档时，`\n` 被翻译成 `\r\n`，于是"改十几段"
+> 被记成整文件重写。第 94 次提交把这 8 个文件归一化回 LF，本身不改内容，却又记了一笔
+> `+5481/−5460`。
+>
+> **这是同一个坑踩第二次。** M5 当时只是归一化，没有加防护；M6 加了 `.gitattributes`
+> （`* text=auto eol=lf` + 二进制声明），让下次写坏也在 `git add` 时被转回来。
+> 换句话说：第一次是事故，第二次是**没从第一次学到东西**——这一点不粉饰。
+
+### 4.7.1 "先红后绿"在 M6 的样子：三次红，两种性质
+
+**第一次（T-11 注入）**：`tests/test_injection.py` 与 `app/injection.py` 同时写，
+但先跑测试。首跑 8 项红，红的形态是 `ModuleNotFoundError: app.injection`——
+**这种红证明力很弱**（只说明模块不存在），所以真正有价值的是实现之后那轮：
+把降权系数、保留阈值、8 种形态逐条断言。
+
+**第二次（T-12 版本冲突）**：14 项红 → 实现后转绿。但**转绿之后才发现不算完**：
+演示库 4 份文件的三个元数据列全是 NULL，界面上什么也看不到。
+于是才有了第 81 次（补 `PATCH /documents`）与第 88 次（补 2025 年版演示文件）两次提交。
+**这两次不是"顺手多做"，是"绿了但功能不存在"的补救。**
+
+**第三次（T-24 密钥扫描）**：这次红是**测试抓到了写文档的人**。
+`docs/50-测试与评测/安全自查.md` 初稿在"怎么查全历史"的命令示例里写了完整 API key，
+`test_security_scan.py` 当场判红：
+
+```
+AssertionError: 疑似密钥入库：
+  OpenAI/兼容 key @ docs\50-测试与评测\安全自查.md: sk-3c1061c34…
+```
+
+改成只写前 9 位后转绿。这条留在报告与安全自查里，因为它是这道闸门唯一一次真实命中。
+
+### 4.7.2 两个"测试绿了、功能却没有"的实例（本批次最该看的部分）
+
+| 现象 | 单测状态 | 真实状态 |
+| --- | --- | --- |
+| 版本冲突检测 | `test_versions.py` 14 项全绿 | 演示库无一行元数据，界面永远看不到冲突 |
+| 文档元数据可改 | 无（接口不存在） | 只能删了重传，而重传会作废已复核规则 |
+
+第一条的处理：补前端上传/编辑入口 + 补演示数据 + 在真实库上跑一遍
+（`/retrieval/search` 输出两版并列、相差 365 天）。
+第二条的处理：新增第 31 条接口 `PATCH /documents/{id}`（清单外）。
+
+**结论写在这里，也写进了 `08-M6体验与质量.md` §L.4.7–L.4.8：
+单测绿 ≠ 功能可用。判断标准是"能不能在演示库里走一遍"。**
+
+### 4.7.3 三件必须自己说出来的事
+
+**第 1 件：计划 8–12 次，实际 16 次。**
+
+超出的两次是第 81 次（`PATCH /documents`，清单外接口）与第 88 次（演示数据）。
+它们不是拆得过细，而是**做到一半才发现 T-12 缺数据前提**——
+这说明计划时把"检测逻辑"当成了全部工作量，漏掉了"让检测有数据可判"那一半。
+
+**第 2 件：同一个 CRLF 坑踩了第二次。**
+
+M5 已经为它写过一次归一化提交（74 号），M6 又写了一次（94 号）。
+真正的教训不是"注意行尾"，而是**当时的收尾只解决了症状，没有加防护**。
+这次补了 `.gitattributes`，但这条记录要留着——
+它说明"修好了"和"不会再犯"是两件事。
+
+**第 3 件：我把 pytest 的退出码误读成"测试没过"。**
+
+两次全量运行只看到满屏点号、没有汇总行、退出码 1，一度以为 M6 的改动把测试跑挂了。
+实际是两个环境原因：`-q` 叠成 `-qq` 抑制了汇总行；`%TEMP%` 清理被安全钩子拦截后进程被杀。
+排查过程写进了 `08-M6体验与质量.md` §L.4.10 与运行说明 §5.4——
+**误读退出码会让整份测试报告失真，这比一次真的失败更危险。**
+
+### 4.7.4 本批次的门禁实测（数字来自运行）
+
+```
+$ .venv\Scripts\python.exe -m pytest --basetemp=.workbuddy/pt-final
+222 passed, 1 warning in 158.15s (0:02:38)
+
+$ .venv\Scripts\python.exe tools\dump_routes.py
+合计 31 条（前缀 /api/v1）
+按方法：DELETE 1 / GET 14 / PATCH 4 / POST 12
+
+$ npm run typecheck
+（0 error）
+
+$ npx vite build
+✓ 55 modules transformed.  dist 161.92 kB │ gzip 62.73 kB
+```
+
+M6 新增 4 条接口：`POST /messages/{id}/feedback`、`GET /tasks/stats`、
+`GET /workflows/{run_id}`、`PATCH /documents/{id}`（清单外）。
+接口数 27 → **31**，测试 146 → **222**，版本 0.5.0 → **0.6.0**。
+
+---
+
 ## 5. 提交粒度自证
 
 ### 5.1 量化指标
@@ -768,7 +890,7 @@ flowchart LR
     C58 --> C59 --> C60 --> C63 --> C65 --> C67 --> C74
 ```
 
-> M2/M3 各 10 次、M4 12 次提交，节点做了合并显示（`git log --oneline` 可看到全部 58 次）。
+> M2/M3 各 10 次、M4 12 次、M5 16 次、M6 16 次提交，节点做了合并显示（`git log --oneline` 可看到全部 94 次）。
 > M3 的 `b09bd4f → cb0a67b` 是本项目第一段**可验证的红 → 绿**区间，见 §4.4.1；
 > M4 的 `ab708e0 → 53f065d` 是第二段，且**红绿分界点恰好等于"问答能用"的那一次提交**，见 §4.5.1–§4.5.2。
 
@@ -948,6 +1070,31 @@ git log -1 --format=%B        # 提交信息是否符合 type(scope): subject
 > **注意第 59 次的特殊性**：它是我在用户只说"继续"时自行开工的产物（§4.6.3 第 1 条）。
 > 保留而不抹掉，是为了让"这件事发生过"可被评审直接看见。
 
+### A.5 M6 批次完整哈希（提交 79–94）
+
+| # | 完整哈希 | 触及的文件 |
+| --- | --- | --- |
+| 79 | `27152bd8b8316d2bb54f4740cb14b58357e1604b` | `app/workflows.py`、`app/injection.py`、`app/versions.py`、`app/intent.py` |
+| 80 | `17feb1c521530fa3ddc3bf536bacd2bd809839d3` | `app/qa.py`、`app/retrieval.py`、`app/__init__.py`、`app/config.py`、`shared/enums.py`、`shared/codes.py` |
+| 81 | `44e9c41f686f034071e5f97a7a04cc437b83dd28` | `app/documents.py`、`app/matching.py`、`app/schemas.py`、`app/errors.py`、`app/tasks.py` |
+| 82 | `02cc8251f24b57106214bb1704a46f89a4d56360` | `tests/conftest.py`、`tests/test_workflows.py`、`tests/test_injection.py`、`tests/test_versions.py` |
+| 83 | `815c5cc745b3912a2984b26a9ddfb68246709644` | `tests/test_feedback.py`、`tests/test_stats.py`、`tests/test_history.py` |
+| 84 | `a761a5ce074265e92e62acb25d7069a3264450fa` | `tests/test_documents.py`、`tests/test_matching.py` |
+| 85 | `1d8a8142232f2c8e998c753cefee4eaac6ddba75` | `frontend/src/api/client.ts`、`frontend/src/utils/format.ts` |
+| 86 | `854dcc3e9b853c98acf421bee78f4a023a74573e` | `frontend/src/views/AskView.vue` |
+| 87 | `7bb7627d1832c4182fe519159b0d72d7e9f0ff47` | `frontend/src/views/DashboardView.vue`、`LibraryView.vue`、`MatchView.vue` |
+| 88 | `05f12064ba3a6ee30a23b8609de037af7f0674ba` | `tools/make_demo_docs.py`、`tools/seed_demo_versions.py`、`demo/01-本科生奖学金评审办法（2025年版）.pdf` |
+| 89 | `ad2b27565815ea1a4221ec553a15946ee9bbc716` | `docs/30-接口契约/接口清单.md`、`docs/20-系统设计/系统设计说明书.md` |
+| 90 | `7ae02fc788b68f183de36697ae57e6a283bfea8e` | `docs/20-系统设计/数据模型.md`、`docs/60-交付/运行说明.md` |
+| 91 | `21a8c3e6885f23bf4e42a23533c0216a77dba37a` | `docs/50-测试与评测/测试报告.md`、`安全自查.md` |
+| 92 | `58797ebaf130c55fbe8fb25cd9d21514770dede5` | `docs/60-交付/已知限制.md`、`docs/90-AI协作留痕/08-M6体验与质量.md` |
+| 93 | `4f3f399ee9a1fe385763b2052e6c59e137eb6aaa` | `README.md` |
+| 94 | `6f05b0bdceacd7bbdf6699120d75f775fcec9ea7` | `.gitattributes` 与八个被写成 CRLF 的文件（行尾归一化，内容不变） |
+
+> **可自查线索**：`git log --oneline 2ca5795..HEAD` 应当正好 16 行，与上表 79–94 一一对应。
+> 第 94 次之后还有一次 `docs(compliance)` 提交（本文的修订），它不在上表里——
+> 表格写自己的哈希是不可能的事，与 §4.1 同源。
+
 ## 附录 B · 提交信息正反例对照
 
 | 反例 | 正例 | 问题在哪 |
@@ -969,6 +1116,7 @@ git log -1 --format=%B        # 提交信息是否符合 type(scope): subject
 | V1.3 | 2026-11-08 | M3 收尾刷新：追加 §4.4（10 次提交，含两次工作树实测的红→绿证据）；**补登 §4.2.0 漏掉的 6 次提交（9–12、21–22）并改正全文编号**；§5.1 改为逐项标注复现命令，指标刷为 44 次 / 85 文件 / 112 次文件变更；§10 复核指南新增"编号一致性"必查项 |
 | V1.5 | 2026-11-10 | M5 收尾刷新：① 追加 §4.6（16 次提交 + §4.6.1 红→绿工作树实测 52 红 → 54 绿 + §4.6.2 中间态表 + §4.6.3 **五件自述**，含"用户只说'继续'而我自己开了 M5 的工"与"我把六个文档的行尾写坏"）；② 新增附表 A.4；③ §5.1 指标刷为 75 次 / 109 文件 / 183 次文件变更 / +36105−9592（**并标注其中 9966 行是行尾噪声**）/ 净变更 106 文件 +24500−1 |
 | V1.4 | 2026-11-08 | M4 收尾刷新：① 追加 §4.5（12 次提交 + §4.5.1 红→绿两次工作树实测 + §4.5.2 中间态表 + §4.5.3 三件自述，含"真实 API Key 被自己写的安全扫描拦下"）；② 新增附表 A.3（M4 完整哈希）；③ **改正 §6 矩阵里 M3 那 6 行的编号（27–36 → 35–44）**，V1.3 说"改正全文编号"时漏了这一处；④ §7 时间线加 M4 分支；⑤ §5.1 指标刷为 58 次 / 94 文件 / 139 次文件变更 / +19815−485，并写明统计口径从 `--shortstat` 换成 `--numstat` 的理由 |
+| V1.6 | 2026-11-10 | M6 收尾刷新：① 追加 §4.7（16 次提交 + §4.7.1 **三次红的两种性质**——真实断言、绿了但功能不存在、扫描测试抓到写文档的人 + §4.7.2 两个"测试绿了功能却没有"的实例 + §4.7.3 **三件自述**，含"同一个 CRLF 坑踩第二次"与"我把 pytest 退出码误读成测试失败"）；② 新增附表 A.5；③ 净变更如实给出 43 文件 +5272−172，并标注表内 89–94 的数字为行尾噪声 |
 
 > **V1.3 的自我更正**：V1.2 写 M2 提交为"17–26"，而真实顺序是"23–32"。原因见 §4.2.0——
 > 上一版漏登了 6 次提交，导致后续编号整体前移 6 位。这不是笔误，是**手工维护编号的必然结果**，
