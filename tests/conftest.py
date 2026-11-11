@@ -165,3 +165,102 @@ def policy(app):
             "rule_codes": {r.rule_code: r.id for r in rule_rows},
         }
     return ids
+
+
+# ---------------------------------------------------------------- M6 夹具
+@pytest.fixture()
+def llm_on(app):
+    """把配置切成"已接入模型"，并把覆盖率闸门压到 0。
+
+    闸门压 0 是刻意的：M6 的用例验的是**节点轨迹、注入标记、版本冲突、反馈**
+    这些"链路之上"的行为，不该因为某条片段覆盖率恰好低于阈值而集体变红。
+    需要验闸门的用例自己把阈值调回去。
+    """
+    def _enable(key: str = "test-key", model: str = "test-model"):
+        settings = app.extensions["settings"]
+        settings.llm_api_key = key
+        settings.llm_model = model
+        settings.rag_min_coverage = 0.0
+    return _enable
+
+
+@pytest.fixture()
+def mock_llm(monkeypatch):
+    """替掉模型 HTTP 层。返回一个"把模型输出设成什么"的函数。
+
+    不调真实模型：这些用例验的是**代码对模型输出的处理**，
+    调真模型会让失败原因变成"今天模型措辞变了"，那不是回归。
+    """
+    def _mock(content: str, *, latency: int = 12, prompt: int = 120,
+              completion: int = 60, reasoning: int | None = None):
+        payload = {
+            "model": "fake-model",
+            "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": prompt,
+                "completion_tokens": completion,
+                "completion_tokens_details": {"reasoning_tokens": reasoning},
+            },
+        }
+        calls = {"n": 0, "prompt": ""}
+
+        def _post(body):
+            calls["n"] += 1
+            # 记下最后一次实际发出去的 Prompt：多轮上下文的用例要断言它
+            messages = body.get("messages") or []
+            calls["prompt"] = "\n".join(m.get("content", "") for m in messages)
+            return payload, latency
+
+        monkeypatch.setattr("app.llm._post", _post)
+        _mock.calls = calls
+    _mock.calls = {"n": 0, "prompt": ""}
+    return _mock
+
+
+def answer_payload(answer: str, cited: list, *, sufficient: bool = True,
+                   confidence: str = "high") -> str:
+    """模型应当返回的 JSON 字符串。"""
+    import json as _json
+
+    return _json.dumps(
+        {"answer": answer, "cited": cited, "sufficient": sufficient,
+         "confidence": confidence},
+        ensure_ascii=False,
+    )
+
+
+@pytest.fixture()
+def seeded_policy(app):
+    """三个片段 + 建好索引。内容与演示文件里的奖学金办法一致，便于对应。"""
+    from app.models import Document, DocumentChunk
+
+    chunks = [
+        ("第四条 申请国家励志奖学金，应当同时具备下列条件：学年平均学分绩点不低于 3.0，"
+         "且专业排名位于前 30%；经学校家庭经济困难学生认定程序认定为家庭经济困难。",
+         2, "第二章 申请条件"),
+        ("第九条 申请国家励志奖学金应当提交下列材料：申请表、上一学年成绩单、"
+         "家庭经济困难学生认定结果告知书、个人申请书。", 4, "第四章 申请材料与附则"),
+        ("第七条 申请材料提交截止时间为当年 9 月 10 日 17:00。", 3, "第三章 评审程序"),
+    ]
+    with app.app_context():
+        uploader = db.session.execute(
+            db.select(User.id).where(User.username == "admin")).scalar()
+        document = Document(
+            id=new_ulid(), title="本科生奖学金评审办法", file_name="policy.pdf",
+            stored_name=f"{new_ulid()}.pdf", file_type="pdf", file_size=1024,
+            parse_status="indexed", chunk_count=len(chunks), uploader_id=uploader,
+            academic_year="2026-2027", effective_status="active",
+        )
+        db.session.add(document)
+        for index, (content, page, section) in enumerate(chunks):
+            db.session.add(DocumentChunk(
+                id=new_ulid(), document_id=document.id, chunk_index=index,
+                content=content, char_start=index * 100, char_end=(index + 1) * 100,
+                page_number=page, section_title=section,
+            ))
+        db.session.commit()
+
+        from app.indexing import rebuild_index
+
+        rebuild_index()
+        return document.id
