@@ -269,3 +269,82 @@ def test_unknown_document_is_2002(client, admin_headers):
 def test_pagination_out_of_range_is_1002(client, admin_headers):
     resp = client.get("/api/v1/documents?page=0", headers=admin_headers)
     assert resp.get_json()["code"] == 1002
+
+
+# ---------------------------------------------------------------- M6：版本元数据
+def test_patch_updates_version_metadata(client, admin_headers):
+    """版本冲突检测依赖这三项，上传后能补是它可用的前提。"""
+    created = upload(client, admin_headers, PDF_OK, title="（演示样例）元数据补录"
+                     ).get_json()["data"]
+    assert created["academic_year"] is None
+    assert created["effective_status"] == "unknown"
+
+    resp = client.patch(f"/api/v1/documents/{created['id']}", headers=admin_headers, json={
+        "academic_year": "2025-2026",
+        "published_at": "2025-09-01",
+        "effective_status": "active",
+        "version_label": "2025版",
+    })
+    assert resp.status_code == 200
+    body = resp.get_json()["data"]
+    assert body["academic_year"] == "2025-2026"
+    assert body["published_at"] == "2025-09-01"
+    assert body["effective_status"] == "active"
+    assert body["version_label"] == "2025版"
+    # 只改元数据：解析结果与片段不能受牵连，否则补一次元数据就要重建索引
+    assert body["chunk_count"] == created["chunk_count"]
+    assert body["parse_status"] == created["parse_status"]
+
+
+def test_patch_only_touches_given_fields(client, admin_headers):
+    """只改「有效状态」时不能把标题顺手清空——覆盖式更新很难被发现。"""
+    created = upload(client, admin_headers, PDF_OK, title="（演示样例）只改一个字段"
+                     ).get_json()["data"]
+    body = client.patch(f"/api/v1/documents/{created['id']}", headers=admin_headers,
+                        json={"effective_status": "superseded"}).get_json()["data"]
+    assert body["title"] == "（演示样例）只改一个字段"
+    assert body["effective_status"] == "superseded"
+
+
+def test_patch_can_clear_metadata_back_to_unknown(client, admin_headers):
+    created = upload(client, admin_headers, PDF_OK, title="（演示样例）撤回标注",
+                     published_at="2025-09-01", effective_status="active"
+                     ).get_json()["data"]
+    body = client.patch(f"/api/v1/documents/{created['id']}", headers=admin_headers,
+                        json={"published_at": "", "effective_status": "unknown"}
+                        ).get_json()["data"]
+    assert body["published_at"] is None
+    assert body["effective_status"] == "unknown"
+
+
+def test_patch_rejects_bad_effective_status(client, admin_headers):
+    created = upload(client, admin_headers, PDF_OK, title="（演示样例）非法状态"
+                     ).get_json()["data"]
+    resp = client.patch(f"/api/v1/documents/{created['id']}", headers=admin_headers,
+                        json={"effective_status": "effective"})
+    assert resp.status_code == 400
+    assert resp.get_json()["code"] == 1001
+
+
+def test_patch_empty_title_is_rejected(client, admin_headers):
+    created = upload(client, admin_headers, PDF_OK, title="（演示样例）空标题"
+                     ).get_json()["data"]
+    resp = client.patch(f"/api/v1/documents/{created['id']}", headers=admin_headers,
+                        json={"title": "   "})
+    assert resp.get_json()["code"] == 1001
+
+
+def test_patch_requires_admin(client, admin_headers, student_headers):
+    created = upload(client, admin_headers, PDF_OK, title="（演示样例）越权改元数据"
+                     ).get_json()["data"]
+    resp = client.patch(f"/api/v1/documents/{created['id']}", headers=student_headers,
+                        json={"effective_status": "active"})
+    assert resp.status_code == 403
+    assert resp.get_json()["code"] == 3002
+
+
+def test_patch_unknown_document_is_2002(client, admin_headers):
+    resp = client.patch("/api/v1/documents/01NOTEXIST0000000000000000",
+                        headers=admin_headers, json={"effective_status": "active"})
+    assert resp.status_code == 404
+    assert resp.get_json()["code"] == 2002

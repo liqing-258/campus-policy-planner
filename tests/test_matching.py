@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from app.contract import new_ulid
 
 MATCH = "/api/v1/matches"
@@ -163,3 +165,108 @@ def test_unknown_match_returns_2002(client, student_headers):
     body = resp.get_json()
     assert body["code"] == 2002
     assert "匹配" in body["message"] and "接口不存在" not in body["message"]
+
+
+# ============================================================ M6：按奖项过滤
+@pytest.fixture()
+def grouped_policy(app):
+    """一份文件里同时写着两个奖项的条件——这正是 M5 那个缺口的现场。
+
+    真实政策就是这样：同一份《奖学金评审办法》里，励志奖学金要求绩点 ≥ 3.0，
+    优秀学生奖学金要求 ≥ 3.5。不区分奖项时，一个绩点 3.2 的励志申请人
+    会被优秀奖学金那条判成"不符合"，而且理由看着还挺有理有据。
+    """
+    from app.models import Document, DocumentChunk, PolicyRule, User, db
+
+    with app.app_context():
+        uploader = db.session.execute(
+            db.select(User.id).where(User.username == "admin")).scalar_one()
+        document = Document(
+            id=new_ulid(), title="（测试）奖学金评审办法", file_name="p.pdf",
+            stored_name=f"{new_ulid()}.pdf", file_type="pdf", file_size=100,
+            parse_status="indexed", chunk_count=1, uploader_id=uploader,
+        )
+        db.session.add(document)
+        chunk = DocumentChunk(
+            id=new_ulid(), document_id=document.id, chunk_index=0,
+            content="励志奖学金要求绩点不低于 3.0；优秀学生奖学金要求不低于 3.5；"
+                    "申请人须为在籍本科生。",
+            char_start=0, char_end=60, page_number=1, section_title="第二章",
+        )
+        db.session.add(chunk)
+        db.session.flush()
+        for code, group, operator, expected, description in (
+            ("R-CSL", "励志奖学金", "gte", "3.0", "励志奖学金绩点不低于 3.0"),
+            ("R-YX", "优秀学生奖学金", "gte", "3.5", "优秀学生奖学金绩点不低于 3.5"),
+            ("R-COMMON", None, "equals", "enrolled", "须为在籍在校学生"),
+        ):
+            db.session.add(PolicyRule(
+                id=new_ulid(), document_id=document.id, chunk_id=chunk.id,
+                rule_code=code, rule_type="eligibility", description=description,
+                target_group=group, field_key=("gpa" if code != "R-COMMON"
+                                               else "enrollment_status"),
+                operator=operator, expected_value=expected,
+                original_quote=description, quote_verified=1,
+                extraction_status="suggested", review_status="approved",
+                confidence="high", page_or_section="第二章",
+            ))
+        db.session.commit()
+        return document.id
+
+
+def _gpa_32(enrollment="enrolled"):
+    """绩点 3.2 的申请人：够励志（≥3.0）、不够优秀（<3.5）。"""
+    return {"gpa": 3.2, "enrollment_status": enrollment}
+
+
+def test_without_target_group_both_awards_are_compared(client, student_headers,
+                                                       grouped_policy):
+    body = run_match(client, student_headers, grouped_policy, _gpa_32()).get_json()
+    assert body["code"] == 0, body
+    codes = set(items_by_code(body["data"]))
+    assert codes == {"R-CSL", "R-YX", "R-COMMON"}
+    assert body["data"]["filtered_out"] == 0
+
+
+def test_target_group_keeps_the_right_award(client, student_headers, grouped_policy):
+    """同一个绩点 3.2，申请励志奖学金应当是"符合"——M5 时它被判成不符合。"""
+    data = client.post(MATCH, headers=student_headers, json={
+        "document_id": grouped_policy, "profile": _gpa_32(),
+        "target_group": "励志奖学金",
+    }).get_json()["data"]
+
+    assert data["target_group"] == "励志奖学金"
+    assert data["filtered_out"] == 1
+    items = items_by_code(data)
+    assert set(items) == {"R-CSL", "R-COMMON"}
+    assert items["R-CSL"]["status"] == "met"
+    # 通用条件（未标注奖项）必须保留，否则"在籍"这类前提会被一起滤掉
+    assert items["R-COMMON"]["status"] == "met"
+
+
+def test_same_profile_fails_under_the_other_award(client, student_headers,
+                                                  grouped_policy):
+    """换成优秀学生奖学金，3.2 就是不符合。这不是矛盾，是两条不同的门槛。"""
+    data = client.post(MATCH, headers=student_headers, json={
+        "document_id": grouped_policy, "profile": _gpa_32(),
+        "target_group": "优秀学生奖学金",
+    }).get_json()["data"]
+    items = items_by_code(data)
+    assert set(items) == {"R-YX", "R-COMMON"}
+    assert items["R-YX"]["status"] == "not_met"
+    assert "3.2" in items["R-YX"]["rationale"] and "3.5" in items["R-YX"]["rationale"]
+
+
+def test_unknown_target_group_says_what_is_available(client, student_headers,
+                                                     grouped_policy):
+    """选了一个文件里没有的奖项：不能返回"0 符合"，那会被读成"我全都不符合"。"""
+    resp = client.post(MATCH, headers=student_headers, json={
+        "document_id": grouped_policy, "profile": _gpa_32(),
+        "target_group": "国家奖学金",
+    })
+    body = resp.get_json()
+    assert resp.status_code == 200
+    assert body["code"] == 2008
+    assert body["data"]["target_group"] == "国家奖学金"
+    assert set(body["data"]["available_groups"]) == {"励志奖学金", "优秀学生奖学金"}
+
