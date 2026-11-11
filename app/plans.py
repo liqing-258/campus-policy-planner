@@ -252,8 +252,13 @@ def create_draft(document_id: str, payload: dict, user) -> dict:
         "match_session_id": match_session_id,
         "tasks": tasks,
         "notes": [t["note"] for t in tasks if t["note"]],
-        "persisted": False,
-        "note": "草稿尚未入库：任务只在本次响应里，确认后才会写入任务中心。",
+        # 说清楚"落了什么、没落什么"：plan 行**已经**写库（status=draft，确认时复用同一个 id），
+        # 只有任务是草稿。M6 联调时这里原本只写 `persisted: false`，读的人会以为"什么都没存"，
+        # 于是每点一次"生成计划"就多一条 draft 计划也不觉得有问题。
+        "tasks_persisted": False,
+        "plan_status": plan.status,
+        "note": ("计划行已建（status=draft，确认时复用同一 id），任务是草稿、未写入任务中心。"
+                 "放弃的草稿会留在计划列表里，当前没有删除接口（见 已知限制.md B-9）。"),
     }
 
 

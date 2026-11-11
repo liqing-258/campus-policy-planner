@@ -54,6 +54,24 @@ def test_draft_returns_tasks_without_persisting_them(client, student_headers, po
     assert task_total(client, student_headers) == before
 
 
+def test_draft_persists_a_draft_plan_and_says_so(client, student_headers, policy):
+    """草稿落的是 **plan 行**，不是任务；响应必须把这两件事分开说。
+
+    M6 联调时这里只返回 `persisted: false`，读的人会以为"什么都没存"，
+    于是每点一次"生成计划"就多一条同名草稿也不觉得有问题（已知限制.md B-9）。
+    """
+    data = draft(client, student_headers, policy["document_id"])
+
+    assert data["status"] == "draft"
+    assert data["plan_status"] == "draft"
+    assert data["tasks_persisted"] is False
+    assert "persisted" not in data, "旧布尔字段会让人以为计划也没落库"
+
+    listed = client.get("/api/v1/plans", headers=student_headers).get_json()["data"]
+    ids = [row["id"] for row in listed["items"]]
+    assert data["plan_id"] in ids, "草稿计划必须能在列表里查到——确认时复用的就是这个 id"
+
+
 def test_draft_task_without_source_date_has_null_due(client, student_headers, policy):
     """T-16：规则里没有日期就不许编日期，宁可留空并要求补充。"""
     data = draft(client, student_headers, policy["document_id"])

@@ -458,7 +458,9 @@ export interface DraftData {
   match_session_id: string | null
   tasks: DraftTask[]
   notes: string[]
-  persisted: boolean
+  /** 任务是否已入库。注意 plan 行在草稿阶段就已写库，确认时复用同一 id */
+  tasks_persisted: boolean
+  plan_status: 'draft' | 'confirmed' | 'archived' | 'rejected'
   note: string
 }
 
