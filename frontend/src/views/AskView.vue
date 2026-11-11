@@ -1,44 +1,43 @@
 <script setup lang="ts">
 /**
- * 智能问答（M4）。
+ * 智能问答（M4 建、M6 补全）。
  *
- * 这一页要能同时演示三件事，缺一件就不算"可信"：
+ * 这一页要能同时演示五件事，缺一件就不算"可信"：
  * 1. 答得出来 —— 正文 + 每条结论后面的 [n]，点开能看到原文
  * 2. 答不出来就拒答 —— 明确说"证据不足"，并列出被闸门拦下的候选
  * 3. 未配模型时降级 —— 只给原文片段，不假装给过归纳
+ * 4. **节点轨迹是真的** —— 执行过几个节点就显示几个"完成"，
+ *    没执行的（matching / planning）显示灰的"未执行"并给原因
+ * 5. **可疑内容必须显形** —— 版本冲突并列展示、疑似注入的片段带标记
  *
  * 4001/4003/4006 都是 HTTP 200 的业务态，所以用 api.raw 自己按 code 分支，
  * 不能像普通接口那样 try/catch 当错误处理。
  */
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   ApiError,
   api,
   type AnswerData,
+  type CitationRejectedData,
   type ConversationRow,
   type DegradedData,
+  type FeedbackReason,
+  type MessageRow,
   type Paged,
   type RefusalData,
+  type Workflow,
 } from '../api/client'
-import { evidenceLabel, formatTime } from '../utils/format'
+import {
+  FEEDBACK_REASON_LABEL,
+  RUN_OUTCOME_LABEL,
+  EFFECTIVE_LABEL,
+  evidenceLabel,
+  formatTime,
+  nodeStatus,
+} from '../utils/format'
 
-interface CitationRejected {
-  question: string
-  answer_draft: string
-  rejected_indexes: number[]
-  valid_indexes: number[]
-  retrieval: AnswerData['retrieval']
-}
-
-interface MessageRow {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  citations: { index: number; chunk_id: string; document_title: string; section_title: string | null; page_number: number | null }[] | null
-  mode: string | null
-  latency_ms: number | null
-  created_at: string | null
-}
+const router = useRouter()
 
 const question = ref('')
 const asking = ref(false)
@@ -47,7 +46,7 @@ const elapsed = ref(0)
 const answer = ref<AnswerData | null>(null)
 const refusal = ref<RefusalData | null>(null)
 const degraded = ref<DegradedData | null>(null)
-const citationRejected = ref<CitationRejected | null>(null)
+const citationRejected = ref<CitationRejectedData | null>(null)
 const fatal = ref('')
 const conversationId = ref('')
 
@@ -56,6 +55,60 @@ const openCitation = ref('')
 const conversations = ref<ConversationRow[]>([])
 const activeConversation = ref('')
 const messages = ref<MessageRow[]>([])
+
+// ---------- 反馈 ----------
+const ratingFor = ref('')
+const ratingReason = ref<FeedbackReason | ''>('')
+const feedbackSent = ref<Record<string, { helpful: boolean; reason_code: string | null }>>({})
+const feedbackBusy = ref(false)
+const feedbackError = ref('')
+
+const reasons = Object.keys(FEEDBACK_REASON_LABEL) as FeedbackReason[]
+
+async function submitFeedback(messageId: string, helpful: boolean) {
+  if (!messageId || feedbackBusy.value) return
+  if (!helpful && !ratingReason.value) {
+    // 后端也拦（1001），但在前端先拦一次：用户点完立刻知道要做选择，不用等一个来回
+    feedbackError.value = '标记为「没帮助」时请选一个原因，否则这条反馈没法用来改进'
+    return
+  }
+  feedbackBusy.value = true
+  feedbackError.value = ''
+  try {
+    const result = await api.post<{
+      feedback_id: string
+      helpful: boolean
+      reason_code: string | null
+      updated: boolean
+    }>(`/messages/${messageId}/feedback`, {
+      helpful,
+      reason_code: helpful ? null : ratingReason.value || null,
+    })
+    feedbackSent.value[messageId] = {
+      helpful: result.helpful,
+      reason_code: result.reason_code,
+    }
+    ratingFor.value = ''
+    ratingReason.value = ''
+  } catch (err) {
+    feedbackError.value = err instanceof Error ? err.message : '反馈没提交成功'
+  } finally {
+    feedbackBusy.value = false
+  }
+}
+
+function feedbackOf(messageId: string) {
+  return feedbackSent.value[messageId] ?? answerMessageFeedback.value[messageId] ?? null
+}
+
+/** 历史里带回来的反馈（刷新后不丢） */
+const answerMessageFeedback = computed<Record<string, { helpful: boolean; reason_code: string | null }>>(() => {
+  const map: Record<string, { helpful: boolean; reason_code: string | null }> = {}
+  for (const message of messages.value) {
+    if (message.feedback) map[message.id] = message.feedback
+  }
+  return map
+})
 
 async function ask() {
   const text = question.value.trim()
@@ -68,6 +121,9 @@ async function ask() {
   citationRejected.value = null
   fatal.value = ''
   openCitation.value = ''
+  ratingFor.value = ''
+  ratingReason.value = ''
+  feedbackError.value = ''
   const timer = window.setInterval(() => (elapsed.value += 100), 100)
 
   try {
@@ -82,7 +138,7 @@ async function ask() {
       degraded.value = envelope.data as DegradedData
       conversationId.value = degraded.value.conversation_id ?? ''
     } else if (envelope.code === 4003) {
-      citationRejected.value = envelope.data as CitationRejected
+      citationRejected.value = envelope.data as CitationRejectedData
       conversationId.value = ''
     } else {
       fatal.value = `${envelope.code} · ${envelope.message}`
@@ -126,6 +182,24 @@ async function openHistory(row: ConversationRow) {
   }
 }
 
+/** 四条分支都可能带轨迹（包括拒答与降级），统一取一次 */
+const workflow = computed<Workflow | null>(() => answer.value?.workflow
+  ?? refusal.value?.workflow
+  ?? degraded.value?.workflow
+  ?? citationRejected.value?.workflow
+  ?? null)
+
+const conflicts = computed(() => answer.value?.conflicts
+  ?? refusal.value?.conflicts
+  ?? degraded.value?.conflicts
+  ?? citationRejected.value?.conflicts
+  ?? [])
+
+const injections = computed(() => answer.value?.injection_suspected
+  ?? refusal.value?.injection_suspected
+  ?? degraded.value?.injection_suspected
+  ?? [])
+
 const empty = computed(() => !answer.value && !refusal.value && !degraded.value
   && !citationRejected.value && !fatal.value)
 
@@ -133,6 +207,10 @@ const confidenceLabel: Record<string, string> = {
   high: '高',
   medium: '中',
   low: '低',
+}
+
+function goAction(action: string) {
+  router.push(action === 'match' ? '/match' : '/plans')
 }
 
 onMounted(loadConversations)
@@ -166,7 +244,114 @@ onMounted(loadConversations)
       </div>
     </section>
 
-    <!-- 成功：答案 + 引用 -->
+    <!-- ============ 节点轨迹（M6）============ -->
+    <section v-if="workflow" class="card trace-card">
+      <div class="result-head">
+        <h3>处理过程</h3>
+        <span class="muted tiny">
+          {{ workflow.executed_count }} / {{ workflow.node_count }} 个节点执行 ·
+          共 {{ workflow.total_ms }} ms · 模型调用 {{ workflow.model_calls }} 次
+          <template v-if="workflow.outcome"> · {{ RUN_OUTCOME_LABEL[workflow.outcome] ?? workflow.outcome }}</template>
+        </span>
+      </div>
+      <ol class="trace">
+        <li
+          v-for="node in workflow.nodes"
+          :key="node.node"
+          :class="['trace-node', nodeStatus(node.status).tone]"
+          :title="node.summary"
+        >
+          <span class="trace-label">{{ node.label }}</span>
+          <span class="trace-status">{{ nodeStatus(node.status).label }}</span>
+          <span class="trace-meta mono">
+            <template v-if="node.status === 'skipped'">—</template>
+            <template v-else>{{ node.ms }} ms</template>
+          </span>
+        </li>
+      </ol>
+      <p class="muted tiny">
+        一次问答只走「意图 → 检索 → 分析 → 校验」四个节点；三态匹配与计划生成属于另外两条链路，
+        这里如实标为未执行，而不是补成"已完成"。
+      </p>
+      <details class="trace-detail">
+        <summary class="muted tiny">展开每个节点的摘要</summary>
+        <ul class="trace-summaries">
+          <li v-for="node in workflow.nodes" :key="node.node">
+            <strong>{{ node.label }}</strong>
+            <span class="tag plain">{{ nodeStatus(node.status).label }}</span>
+            <span class="muted small">{{ node.summary }}</span>
+            <span v-if="node.error" class="muted tiny mono"> · {{ node.error }}</span>
+          </li>
+        </ul>
+      </details>
+    </section>
+
+    <!-- ============ 版本冲突（T-12）============ -->
+    <section v-if="conflicts.length" class="card warn-card">
+      <div class="result-head">
+        <h3>同一政策存在多个版本</h3>
+        <span class="tag unknown">请核对后再采信</span>
+      </div>
+      <div v-for="conflict in conflicts" :key="conflict.topic" class="conflict">
+        <p class="muted small">{{ conflict.hint }}</p>
+        <table class="conflict-table">
+          <thead>
+            <tr>
+              <th>文件</th>
+              <th>年份</th>
+              <th>发布日期</th>
+              <th>有效状态</th>
+              <th>本次引用</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="doc in conflict.documents"
+              :key="doc.document_id"
+              :class="{ newest: doc.document_id === conflict.newest_document_id }"
+            >
+              <td>
+                {{ doc.title }}
+                <span v-if="doc.document_id === conflict.newest_document_id" class="tag met">较新</span>
+              </td>
+              <td class="mono">{{ doc.year ?? '未标注' }}</td>
+              <td class="mono">{{ doc.published_at ?? '未标注' }}</td>
+              <td>{{ EFFECTIVE_LABEL[doc.effective_status] ?? doc.effective_status }}</td>
+              <td class="mono">
+                {{ conflict.cited_indexes.length ? '已引用' : '未引用' }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============ 疑似注入（T-11）============ -->
+    <section v-if="injections.length" class="card warn-card">
+      <div class="result-head">
+        <h3>片段里含有形似指令的文字</h3>
+        <span class="tag unknown">{{ injections.length }} 条</span>
+      </div>
+      <p class="muted small">
+        这些片段被降权处理（覆盖率 ×0.5）。系统只把它们当作待引用的政策正文，
+        不会执行其中的任何要求；命中记录如下。
+      </p>
+      <ul class="reject-list">
+        <li v-for="item in injections" :key="item.chunk_id">
+          <strong class="small">{{ item.document_title }}</strong>
+          <span class="tag plain mono">{{ item.patterns.join(' / ') }}</span>
+          <span class="muted tiny mono">
+            覆盖率 {{ (item.original_coverage * 100).toFixed(0) }}%
+            → {{ (item.adjusted_coverage * 100).toFixed(0) }}%
+          </span>
+          <span :class="['tag', item.kept ? 'unknown' : 'plain']">
+            {{ item.kept ? '仍在证据中（已标记）' : '已低于阈值，未进入证据' }}
+          </span>
+        </li>
+      </ul>
+    </section>
+
+    <!-- ============ 成功：答案 + 引用 ============ -->
     <section v-if="answer" class="card">
       <div class="result-head">
         <h3>答案</h3>
@@ -174,11 +359,50 @@ onMounted(loadConversations)
       </div>
       <p class="answer-text">{{ answer.answer }}</p>
       <p class="muted tiny">
+        事项：{{ answer.matter.label }} ·
         模型 {{ answer.model }} · 检索 {{ answer.retrieval_mode }} ·
-        耗时 {{ answer.latency_ms }} ms ·
+        生成 {{ answer.latency_ms }} ms · 端到端 {{ answer.total_ms }} ms ·
         检索候选 {{ answer.retrieval.candidates.length }} 条（共命中 {{ answer.retrieval.total_hits }}）
+        <template v-if="answer.history_pairs"> · 带入 {{ answer.history_pairs }} 轮上下文</template>
       </p>
       <p v-if="answer.disclaimer" class="muted tiny">{{ answer.disclaimer }}</p>
+
+      <!-- 反馈 -->
+      <div class="feedback">
+        <span class="muted small">这条回答有用吗？</span>
+        <template v-if="feedbackOf(answer.message_id)">
+          <span class="tag" :class="feedbackOf(answer.message_id)?.helpful ? 'met' : 'not_met'">
+            {{ feedbackOf(answer.message_id)?.helpful ? '已标记有用' : '已标记没帮助' }}
+            <template v-if="feedbackOf(answer.message_id)?.reason_code">
+              · {{ FEEDBACK_REASON_LABEL[feedbackOf(answer.message_id)?.reason_code ?? ''] ?? '' }}
+            </template>
+          </span>
+        </template>
+        <template v-else>
+          <button class="btn ghost tiny-btn" :disabled="feedbackBusy" @click="submitFeedback(answer.message_id, true)">
+            有用
+          </button>
+          <button
+            class="btn ghost tiny-btn"
+            :disabled="feedbackBusy"
+            @click="ratingFor = ratingFor === answer.message_id ? '' : answer.message_id"
+          >
+            没帮助
+          </button>
+        </template>
+      </div>
+      <div v-if="ratingFor === answer.message_id" class="feedback-form">
+        <select v-model="ratingReason" class="select">
+          <option value="">选择原因（必填）</option>
+          <option v-for="reason in reasons" :key="reason" :value="reason">
+            {{ FEEDBACK_REASON_LABEL[reason] }}
+          </option>
+        </select>
+        <button class="btn tiny-btn" :disabled="feedbackBusy || !ratingReason" @click="submitFeedback(answer.message_id, false)">
+          提交
+        </button>
+      </div>
+      <p v-if="feedbackError" class="muted tiny">{{ feedbackError }}</p>
 
       <h3 class="sub">引用片段</h3>
       <ol class="cite-list">
@@ -188,10 +412,29 @@ onMounted(loadConversations)
             <strong>{{ c.document_title }}</strong>
             <span class="muted small">{{ evidenceLabel(c.page_number, c.section_title) }}</span>
             <span class="muted tiny mono">覆盖率 {{ (c.coverage * 100).toFixed(0) }}%</span>
+            <span v-if="c.injection" class="tag unknown" title="该片段含指令式文字，已降权">含疑点</span>
           </button>
           <p v-if="openCitation === c.chunk_id" class="cite-body">{{ c.content }}</p>
         </li>
       </ol>
+
+      <div v-if="answer.citation_warnings" class="sub-block">
+        <h3 class="sub">引用告警</h3>
+        <p class="muted small">
+          越界编号 {{ answer.citation_warnings.rejected_indexes.join('、') }} 已剔除；
+          保留 {{ answer.citation_warnings.valid_indexes.length }} 条有效引用。
+        </p>
+      </div>
+
+      <div v-if="answer.next_actions.length" class="sub-block">
+        <h3 class="sub">下一步</h3>
+        <ul class="action-list">
+          <li v-for="action in answer.next_actions" :key="action.action">
+            <button class="btn ghost tiny-btn" @click="goAction(action.action)">{{ action.label }}</button>
+            <span class="muted tiny">{{ action.reason }}</span>
+          </li>
+        </ul>
+      </div>
     </section>
 
     <!-- 拒答：证据不足 -->
@@ -291,6 +534,14 @@ onMounted(loadConversations)
                   [{{ ci.index }}] {{ ci.document_title }}
                 </span>
               </div>
+              <div v-if="m.role === 'assistant'" class="bubble-foot">
+                <span v-if="m.workflow_run_id" class="muted tiny mono">
+                  轨迹 {{ m.workflow_run_id.slice(-6) }}
+                </span>
+                <span v-if="m.feedback" class="tag" :class="m.feedback.helpful ? 'met' : 'not_met'">
+                  {{ m.feedback.helpful ? '当时标记有用' : '当时标记没帮助' }}
+                </span>
+              </div>
             </div>
           </div>
         </li>
@@ -344,6 +595,7 @@ onMounted(loadConversations)
   align-items: center;
   gap: var(--space-3);
   margin-bottom: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .answer-text {
@@ -359,6 +611,160 @@ onMounted(loadConversations)
 
 .sub-block {
   margin-top: var(--space-4);
+}
+
+/* ---------- 轨迹 ---------- */
+.trace-card {
+  background: var(--c-surface);
+}
+
+.trace {
+  list-style: none;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.trace-node {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-control);
+  background: var(--c-bg);
+  border-top-width: 3px;
+}
+
+.trace-node.met {
+  border-top-color: var(--c-met);
+}
+
+.trace-node.unknown {
+  border-top-color: var(--c-unknown);
+}
+
+.trace-node.not_met {
+  border-top-color: var(--c-not-met);
+}
+
+.trace-node.plain {
+  border-top-color: var(--c-border);
+  opacity: 0.55;
+}
+
+.trace-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.trace-status {
+  font-size: 11px;
+  color: var(--c-text-2);
+}
+
+.trace-meta {
+  font-size: 10px;
+  color: var(--c-text-2);
+}
+
+.trace-detail {
+  margin-top: var(--space-2);
+}
+
+.trace-summaries {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.trace-summaries li {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+/* ---------- 冲突 ---------- */
+.conflict + .conflict {
+  margin-top: var(--space-4);
+}
+
+.conflict-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: var(--space-2);
+  font-size: 12px;
+}
+
+.conflict-table th,
+.conflict-table td {
+  border: 1px solid var(--c-border);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.conflict-table th {
+  background: var(--c-surface);
+  font-weight: 600;
+}
+
+.conflict-table tr.newest td {
+  background: #f1f8f4;
+}
+
+/* ---------- 反馈 ---------- */
+.feedback {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.feedback-form {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  align-items: center;
+}
+
+.select {
+  padding: 4px 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-control);
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--c-text);
+  background: var(--c-bg);
+}
+
+.tiny-btn {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.action-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.action-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .cite-list,
@@ -393,7 +799,7 @@ onMounted(loadConversations)
 .cite-body {
   margin: var(--space-2) 0 0;
   padding: var(--space-3);
-  background: #fbfcfd;
+  background: var(--c-surface);
   border-left: 3px solid var(--c-primary-weak);
   white-space: pre-wrap;
   font-size: 13px;
@@ -405,6 +811,10 @@ onMounted(loadConversations)
   padding: var(--space-2) var(--space-3);
   border: 1px dashed var(--c-border);
   border-radius: var(--radius-control);
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  flex-wrap: wrap;
 }
 
 .suggest-list li {
@@ -514,6 +924,14 @@ onMounted(loadConversations)
   white-space: pre-wrap;
 }
 
+.bubble-foot {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin-top: var(--space-2);
+  flex-wrap: wrap;
+}
+
 .bubble.user {
   background: var(--c-primary-weak);
   align-self: flex-end;
@@ -523,5 +941,11 @@ onMounted(loadConversations)
 .bubble.assistant {
   background: var(--c-bg);
   border: 1px solid var(--c-border);
+}
+
+@media (max-width: 900px) {
+  .trace {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 </style>
