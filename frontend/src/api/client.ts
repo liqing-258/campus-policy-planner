@@ -236,6 +236,80 @@ export interface Candidate {
   score: number
   coverage: number
   content?: string
+  /** 命中注入特征时的标记（M6 / T-11） */
+  injection?: InjectionMark
+}
+
+export interface InjectionHit {
+  code: string
+  description: string
+  evidence: string
+}
+
+export interface InjectionMark {
+  suspected: true
+  hits?: InjectionHit[]
+  patterns?: string[]
+  original_coverage?: number | null
+  weight?: number
+  note: string
+}
+
+/** 一句话概括某个片段为什么被降权；`kept=false` 表示它被覆盖率闸门挡在证据之外 */
+export interface InjectionSuspect {
+  chunk_id: string
+  document_title: string
+  patterns: string[]
+  original_coverage: number
+  adjusted_coverage: number
+  kept: boolean
+}
+
+/** 同一政策的多个版本（M6 / T-12） */
+export interface VersionConflict {
+  topic: string
+  documents: {
+    document_id: string
+    title: string
+    year: number | null
+    academic_year: string | null
+    published_at: string | null
+    effective_status: string
+    version_label: string | null
+  }[]
+  newest_document_id: string
+  day_gap: number | null
+  cited_indexes: number[]
+  hint: string
+}
+
+// ---------- 工作流（M6）----------
+export type NodeStatus = 'succeeded' | 'degraded' | 'failed' | 'skipped'
+
+export interface WorkflowNode {
+  node: 'intent' | 'retrieval' | 'analysis' | 'matching' | 'planning' | 'validation'
+  label: string
+  status: NodeStatus
+  ms: number
+  summary: string
+  model_calls: number
+  detail?: Record<string, unknown>
+  error?: string
+}
+
+export interface Workflow {
+  run_id: string
+  run_type: 'qa' | 'match' | 'plan'
+  status: 'running' | 'succeeded' | 'degraded' | 'failed'
+  outcome: 'answered' | 'refused' | 'citation_rejected' | 'degraded' | 'failed' | null
+  total_ms: number
+  model_calls: number
+  created_at: string | null
+  nodes: WorkflowNode[]
+  /** 真正执行过的节点数（`skipped` 不计） */
+  executed_count: number
+  node_count: number
+  error?: string
 }
 
 export interface RetrievalInfo {
@@ -246,9 +320,17 @@ export interface RetrievalInfo {
   index_size: number
   refused: boolean
   refuse_reason: string | null
+  conflicts?: VersionConflict[]
+  injection_suspected?: InjectionSuspect[]
 }
 
 export interface Citation extends Candidate {}
+
+export interface NextAction {
+  action: 'match' | 'plan'
+  label: string
+  reason: string
+}
 
 export interface AnswerData {
   answer: string
@@ -264,8 +346,23 @@ export interface AnswerData {
     reasoning_tokens: number | null
   }
   conversation_id: string
+  message_id: string
   retrieval: RetrievalInfo
   disclaimer?: string
+  // ---------- M6 ----------
+  matter: { type: string; label: string }
+  next_actions: NextAction[]
+  /** 本轮带了几轮历史进 Prompt */
+  history_pairs: number
+  conflicts: VersionConflict[]
+  injection_suspected: InjectionSuspect[]
+  workflow: Workflow
+  total_ms: number
+  citation_warnings?: {
+    rejected_indexes: number[]
+    valid_indexes: number[]
+    note: string
+  }
 }
 
 export interface RefusalData {
@@ -276,6 +373,9 @@ export interface RefusalData {
   rejected_candidates: Candidate[]
   suggestions: string[]
   conversation_id?: string
+  conflicts?: VersionConflict[]
+  injection_suspected?: InjectionSuspect[]
+  workflow?: Workflow
 }
 
 export interface DegradedData {
@@ -285,6 +385,21 @@ export interface DegradedData {
   retrieval: RetrievalInfo
   candidates: Candidate[]
   conversation_id?: string
+  conflicts?: VersionConflict[]
+  injection_suspected?: InjectionSuspect[]
+  workflow?: Workflow
+}
+
+/** 引用被拒（4003）：模型给了答案但没有一条引用能落到原文 */
+export interface CitationRejectedData {
+  question: string
+  answer_draft: string
+  rejected_indexes: number[]
+  valid_indexes: number[]
+  retrieval: RetrievalInfo
+  conflicts?: VersionConflict[]
+  injection_suspected?: InjectionSuspect[]
+  workflow?: Workflow
 }
 
 export interface Evidence {
@@ -315,6 +430,10 @@ export interface MatchData {
   summary: { met: number; not_met: number; unknown: number; total: number }
   disclaimer: string
   created_at?: string | null
+  /** 本次按哪个奖项过滤（M6）；为空表示没过滤 */
+  target_group?: string | null
+  /** 被奖项过滤掉的条件规则条数 */
+  filtered_out?: number
 }
 
 export interface DraftTask {
@@ -382,4 +501,51 @@ export interface ConversationRow {
   created_at: string | null
   updated_at: string | null
   message_count?: number
+}
+
+export interface MessageRow {
+  id: string
+  conversation_id: string
+  role: 'user' | 'assistant'
+  content: string
+  citations: Citation[] | null
+  model: string | null
+  latency_ms: number | null
+  mode: string | null
+  /** 这条答案对应的运行记录；为空表示历史数据或降级前的记录 */
+  workflow_run_id: string | null
+  /** 我对这条答案的反馈（没评过就是 null） */
+  feedback: { helpful: boolean; reason_code: string | null } | null
+  created_at: string | null
+}
+
+export type FeedbackReason =
+  | 'wrong_fact'
+  | 'missing_citation'
+  | 'outdated_policy'
+  | 'too_vague'
+  | 'other'
+
+export interface FeedbackResult {
+  feedback_id: string
+  message_id: string
+  helpful: boolean
+  reason_code: string | null
+  comment: string | null
+  /** true = 覆盖了之前的反馈（同一个人对同一条答案只留一条） */
+  updated: boolean
+  created_at: string | null
+}
+
+/** 任务统计（M6）：口径由后端定义，前端不自己数 */
+export interface TaskStats {
+  total: number
+  open: number
+  by_status: Record<TaskStatus, number>
+  by_priority: Record<string, number>
+  overdue: number
+  due_soon: number
+  completion_rate: number
+  plans: Record<string, number>
+  generated_at: string
 }

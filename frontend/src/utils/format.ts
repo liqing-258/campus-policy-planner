@@ -120,3 +120,59 @@ export function evidenceLabel(page: number | null, section: string | null): stri
   if (page) parts.push(`第 ${page} 页`)
   return parts.join(' · ') || '位置未标注'
 }
+
+// ============================================================ M6：工作流
+/**
+ * 节点状态 → 中文 + 语义色。
+ *
+ * `skipped` 单独给一个中性色而不是绿色，是这个模块唯一重要的设计决定：
+ * 把没执行的节点画成"已完成"，进度条会好看很多，但那是在骗人。
+ * 一次问答只走 4 个节点，另外 2 个必须看起来就是"没走"。
+ */
+export const NODE_STATUS: Record<
+  string,
+  { label: string; tone: 'met' | 'not_met' | 'unknown' | 'plain' }
+> = {
+  succeeded: { label: '完成', tone: 'met' },
+  degraded: { label: '降级', tone: 'unknown' },
+  failed: { label: '失败', tone: 'not_met' },
+  skipped: { label: '未执行', tone: 'plain' },
+  running: { label: '进行中', tone: 'unknown' },
+}
+
+export function nodeStatus(status: string) {
+  return NODE_STATUS[status] ?? { label: status, tone: 'plain' as const }
+}
+
+export const RUN_OUTCOME_LABEL: Record<string, string> = {
+  answered: '正常作答',
+  refused: '按规则拒答',
+  citation_rejected: '引用无法核验，已拒答',
+  degraded: '降级返回原文',
+  failed: '链路失败',
+}
+
+export const RUN_STATUS_LABEL: Record<string, string> = {
+  running: '运行中',
+  succeeded: '已完成',
+  degraded: '已降级',
+  failed: '失败',
+}
+
+/** 反馈原因码 → 中文。与后端的 FEEDBACK_REASONS 一一对应。 */
+export const FEEDBACK_REASON_LABEL: Record<string, string> = {
+  wrong_fact: '事实写错了',
+  missing_citation: '缺少可核对的引用',
+  outdated_policy: '引用了旧版政策',
+  too_vague: '回答太笼统',
+  other: '其他原因',
+}
+
+/** 有效状态 → 中文 + 色调。版本冲突面板要用它标出"哪份现行有效"。 */
+export const EFFECTIVE_LABEL: Record<string, string> = {
+  active: '现行有效',
+  superseded: '已被替代',
+  expired: '已失效',
+  unknown: '未标注',
+}
+
