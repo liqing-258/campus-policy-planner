@@ -9,7 +9,7 @@
  * 匹配完全不调模型（设计 §7.6）：同一个人填同样的画像，结果必须每次都一样，
  * 而且能追溯到政策原文的那一条。所以这一页不会出现"AI 判断"字样。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   ApiError,
   api,
@@ -32,11 +32,21 @@ import {
 const documents = ref<DocumentRow[]>([])
 /** 每份文件"已复核的条件类规则"条数——匹配能不能跑，取决于这个数不是 0。 */
 const conditionsByDoc = ref<Record<string, number>>({})
+/**
+ * 每份文件里出现过的奖项（target_group）。M6 补的缺口：
+ * 同一份《奖学金评审办法》常同时写着励志奖学金（绩点 ≥ 3.0）与优秀学生奖学金（≥ 3.5），
+ * 不选奖项时，绩点 3.2 的励志申请人会被优秀那条判成"不符合"——判错了人。
+ * 这份清单来自已经在拉取的规则列表，不额外发请求。
+ */
+const groupsByDoc = ref<Record<string, string[]>>({})
 const documentId = ref('')
+const targetGroup = ref('')
 const matching = ref(false)
 const result = ref<MatchData | null>(null)
 const error = ref('')
 const notice = ref('')
+/** 2008 时后端回传的"这份文件里真实的奖项清单"，用来让用户直接改选。 */
+const noticeGroups = ref<string[]>([])
 
 const draft = ref<DraftData | null>(null)
 const drafting = ref(false)
@@ -77,21 +87,32 @@ async function loadDocuments() {
     // 只列出"已索引"的文件还不够：没有已复核条件规则的文件点进来只会拿到 2008。
     // 这里顺带查一次每份文件的已复核条件数，把能用的排在前面并默认选中。
     const counts: Record<string, number> = {}
+    const groups: Record<string, string[]> = {}
     await Promise.all(
       data.items.map(async (doc) => {
         try {
           const rules = await api.get<Paged<RuleRow>>(
             `/documents/${doc.id}/rules?review_status=approved&page=1&page_size=100`,
           )
-          counts[doc.id] = rules.items.filter(
+          const conditions = rules.items.filter(
             (r) => r.rule_type === 'eligibility' || r.rule_type === 'restriction',
-          ).length
+          )
+          counts[doc.id] = conditions.length
+          groups[doc.id] = Array.from(
+            new Set(
+              conditions
+                .map((r) => (r.target_group ?? '').trim())
+                .filter((g): g is string => g.length > 0),
+            ),
+          ).sort()
         } catch {
           counts[doc.id] = 0
+          groups[doc.id] = []
         }
       }),
     )
     conditionsByDoc.value = counts
+    groupsByDoc.value = groups
     documents.value = [...data.items].sort(
       (a, b) => (counts[b.id] ?? 0) - (counts[a.id] ?? 0),
     )
@@ -119,18 +140,25 @@ async function runMatch() {
   matching.value = true
   error.value = ''
   notice.value = ''
+  noticeGroups.value = []
   result.value = null
   draft.value = null
   confirmedId.value = ''
   try {
-    const envelope = await api.raw<MatchData>('/matches', {
+    const body: Record<string, unknown> = {
       document_id: documentId.value,
       profile: buildProfile(),
-    })
+    }
+    // 不选奖项就不发这个字段：后端会把文件里所有条件一起比，这是 M5 的行为，
+    // 也是"我只是想看看这份办法写了哪些条件"的合理用法。
+    if (targetGroup.value) body.target_group = targetGroup.value
+    const envelope = await api.raw<MatchData>('/matches', body)
     if (envelope.code === 0) {
       result.value = envelope.data as MatchData
     } else if (envelope.code === 2008) {
       notice.value = envelope.message
+      const payload = envelope.data as { available_groups?: string[] } | null
+      noticeGroups.value = payload?.available_groups ?? []
     } else {
       error.value = `${envelope.code} · ${envelope.message}`
     }
@@ -207,8 +235,23 @@ const grouped = computed(() => {
 })
 
 const currentDoc = computed(() => documents.value.find((d) => d.id === documentId.value))
+const groups = computed(() =>
+  documentId.value ? groupsByDoc.value[documentId.value] ?? [] : [],
+)
 
 onMounted(loadDocuments)
+
+// 换文件必须清空奖项：上一份文件里的「励志奖学金」在这份文件里可能根本不存在，
+// 留着会让下一次请求直接吃一个 2008，用户还得自己猜是哪里出了问题。
+watch(documentId, () => {
+  targetGroup.value = ''
+  result.value = null
+  draft.value = null
+  confirmedId.value = ''
+  notice.value = ''
+  noticeGroups.value = []
+  error.value = ''
+})
 </script>
 
 <template>
@@ -234,7 +277,19 @@ onMounted(loadDocuments)
             </option>
           </select>
         </label>
+        <label v-if="groups.length" class="field award">
+          <span>申请奖项</span>
+          <select v-model="targetGroup" class="select">
+            <option value="">不区分奖项（比对全部条件）</option>
+            <option v-for="g in groups" :key="g" :value="g">{{ g }}</option>
+          </select>
+        </label>
       </div>
+      <p v-if="groups.length" class="muted tiny">
+        这份文件里有 {{ groups.length }} 套奖项条件。不选奖项会把全部条件一起比对——
+        绩点 3.2 在「励志奖学金」下符合、在「优秀学生奖学金」下不符合，混着比会判错人。
+        选中奖项后，只比对明确标注该奖项的条件，以及未标注奖项的通用条件。
+      </p>
       <p v-if="currentDoc" class="muted tiny">
         <template v-if="(conditionsByDoc[currentDoc.id] ?? 0) > 0">
           该文件有 {{ conditionsByDoc[currentDoc.id] }} 条已复核条件，可以匹配。
@@ -267,6 +322,16 @@ onMounted(loadDocuments)
     <section v-if="notice" class="card warn-card">
       <h3>暂时无法匹配</h3>
       <p class="muted">{{ notice }}</p>
+      <div v-if="noticeGroups.length" class="group-pick">
+        <span class="muted tiny">这份文件里实际标注过的奖项：</span>
+        <button
+          v-for="g in noticeGroups"
+          :key="g"
+          class="btn btn-ghost btn-sm"
+          :disabled="matching"
+          @click="targetGroup = g; runMatch()"
+        >{{ g }}</button>
+      </div>
       <p class="muted tiny">
         管理员需要先在该文件上运行规则抽取，并逐条复核通过——没复核的规则不参与判定，
         否则等于拿模型的一次猜测去回答"你符不符合条件"。
@@ -278,6 +343,12 @@ onMounted(loadDocuments)
         <div>
           <h3>匹配结论</h3>
           <p class="muted tiny">{{ result.disclaimer }}</p>
+          <p v-if="result.target_group" class="muted tiny">
+            已按「{{ result.target_group }}」过滤：{{ result.filtered_out ?? 0 }} 条其他奖项的条件未参与本次判定。
+          </p>
+          <p v-else class="muted tiny">
+            未区分奖项：这份文件里全部已复核条件都参与了判定，混着看需自行区分适用哪一套。
+          </p>
         </div>
         <div class="counts">
           <span class="count met">符合 {{ result.summary.met }}</span>
@@ -381,10 +452,30 @@ onMounted(loadDocuments)
 .row {
   display: flex;
   gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .grow {
   flex: 1;
+  min-width: 240px;
+}
+
+.award {
+  min-width: 220px;
+}
+
+.group-pick {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+  margin: var(--space-2) 0;
+}
+
+.btn-sm {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 .select {
