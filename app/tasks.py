@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, request
 
@@ -26,8 +26,13 @@ from app.models import ActionPlan, Task, db
 from app.plans import serialize_task, _parse_iso
 from app.schemas import TaskCreateRequest, TaskPatchRequest, TaskStatusRequest, validate
 from shared.enums import (
+    PLAN_ARCHIVED,
     PLAN_CONFIRMED,
+    PLAN_DRAFT,
     PRIORITIES,
+    TASK_CANCELLED,
+    TASK_DEFERRED,
+    TASK_DOING,
     TASK_DONE,
     TASK_STATUSES,
     TASK_TODO,
@@ -167,3 +172,78 @@ def update_status(task_id: str):
         task.completed_at = None
     db.session.commit()
     return ok(serialize_task(task))
+
+
+@bp.get("/tasks/stats")
+@login_required
+def task_stats():
+    """任务统计（M6 / 契约 #29）。
+
+    **为什么单独一个接口，而不是让前端拉全量任务自己数**
+
+    前端算出来的数字和接口算出来的数字迟早会不一致——分页拉不全、
+    筛选条件不同、时区不同，都会让"待办 5 项"和列表里的 6 行对不上。
+    统计口径只能有一个地方定义，那就是这里。
+
+    口径说明（每个数字都要能被追问）：
+
+    - `by_status` 覆盖**全部五个状态**，缺的补 0。只返回非零状态会让前端
+      画图时列数时多时少，看起来像数据在跳。
+    - `overdue` 只算 `due_at` 已过 **且** 未完成、未取消的任务：
+      已完成的任务过了截止日期不是"逾期"，取消的更不是。
+    - `due_soon` 是未来 7 天内到期（含今天）的未完成任务。
+      7 天是拍的不是算的——它对应"这一周要动手"的心理单位，写在这里备查。
+    - `completion_rate` 的分母**排除已取消**：把作废的任务算进分母，
+      会让"完成率 60%"在作废两条之后变成 75%，用户看不懂为什么努力做事反而"变好了"。
+    - `plans` 按状态分组，同样补 0。
+    """
+    user = current_user()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    rows = db.session.execute(
+        db.select(Task).where(Task.user_id == user.id)
+    ).scalars().all()
+
+    by_status = {status: 0 for status in TASK_STATUSES}
+    by_priority = {priority: 0 for priority in PRIORITIES}
+    overdue = 0
+    due_soon = 0
+    open_total = 0
+
+    for task in rows:
+        by_status[task.status] = by_status.get(task.status, 0) + 1
+        priority = task.priority or "P2"
+        by_priority[priority] = by_priority.get(priority, 0) + 1
+        finished = task.status in (TASK_DONE, TASK_CANCELLED)
+        if not finished:
+            open_total += 1
+            if task.due_at is not None:
+                if task.due_at < now:
+                    overdue += 1
+                elif task.due_at <= now + timedelta(days=7):
+                    due_soon += 1
+
+    denominator = by_status[TASK_DONE] + by_status[TASK_TODO] + \
+        by_status[TASK_DOING] + by_status[TASK_DEFERRED]
+    completion_rate = round(by_status[TASK_DONE] / denominator, 4) if denominator else 0.0
+
+    plan_rows = db.session.execute(
+        db.select(ActionPlan.status, db.func.count())
+        .where(ActionPlan.user_id == user.id)
+        .group_by(ActionPlan.status)
+    ).all()
+    plan_counts = {PLAN_DRAFT: 0, PLAN_CONFIRMED: 0, PLAN_ARCHIVED: 0}
+    for status, count in plan_rows:
+        plan_counts[status] = plan_counts.get(status, 0) + count
+
+    return ok({
+        "total": len(rows),
+        "open": open_total,
+        "by_status": by_status,
+        "by_priority": by_priority,
+        "overdue": overdue,
+        "due_soon": due_soon,
+        "completion_rate": completion_rate,
+        "plans": plan_counts,
+        "generated_at": now.replace(tzinfo=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    })

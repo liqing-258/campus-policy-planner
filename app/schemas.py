@@ -8,7 +8,14 @@ from __future__ import annotations
 
 from datetime import date
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from app.errors import InvalidParam
 
@@ -93,12 +100,18 @@ class SearchRequest(StrictModel):
 
 
 class AskRequest(StrictModel):
-    """提问。conversation_id 为空则新建会话；带 scope_document_ids 可限定只在这些文件里找。"""
+    """提问。conversation_id 为空则新建会话；带 scope_document_ids 可限定只在这些文件里找。
+
+    `use_history`（M6 新增，默认开）：带 conversation_id 时把最近几轮问答拼进 Prompt，
+    用于理解"那成绩单呢"这类指代。关掉它的唯一理由是测试与评测——
+    评测集里每条问题都是独立的，带上历史会污染结果。
+    """
 
     question: str = Field(min_length=1, max_length=500)
     conversation_id: str | None = Field(default=None, max_length=26)
     top_k: int = Field(default=6, ge=1, le=20)
     scope_document_ids: list[str] | None = None
+    use_history: bool = True
 
 
 class LlmAnswer(StrictModel):
@@ -248,8 +261,42 @@ class Profile(StrictModel):
 
 
 class MatchRequest(StrictModel):
+    """匹配入参。
+
+    `target_group`（M6 新增）解决 M5 登记的缺口：同一份文件里可能同时写着
+    励志奖学金（gpa≥3.0）与优秀学生奖学金（gpa≥3.5）两套条件，而匹配接口
+    不按奖项过滤，于是 gpa 3.2 的励志申请人会被优秀奖学金那条判成"不符合"。
+    传了 target_group 就只比对"未标注奖项"或"标注为同一奖项"的规则。
+    """
+
     document_id: str = Field(min_length=1, max_length=26)
     profile: Profile = Field(default_factory=Profile)
+    target_group: str | None = Field(default=None, max_length=64)
+
+
+class FeedbackRequest(StrictModel):
+    """答案反馈。
+
+    `helpful=false` 时 `reason_code` **必填**：一条只有"👎"的反馈无法用来改进任何东西，
+    而多了个下拉框的成本只有一次点击。这是产品判断，不是校验洁癖。
+    """
+
+    helpful: bool
+    reason_code: str | None = Field(default=None, max_length=20)
+    comment: str | None = Field(default=None, max_length=500)
+
+    @field_validator("reason_code")
+    @classmethod
+    def _reason(cls, value):
+        from shared.enums import FEEDBACK_REASONS
+
+        return _check_in(value, FEEDBACK_REASONS, "原因码")
+
+    @model_validator(mode="after")
+    def _require_reason_when_unhelpful(self):
+        if not self.helpful and not self.reason_code:
+            raise ValueError("标记为「没有帮助」时必须给 reason_code")
+        return self
 
 
 class PlanDraftRequest(StrictModel):

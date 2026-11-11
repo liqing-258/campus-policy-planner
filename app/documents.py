@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime, timezone
 
 from flask import Blueprint, current_app, request
@@ -335,6 +336,50 @@ def list_documents():
 @login_required
 def get_document(document_id: str):
     doc = _get_active_or_404(document_id)
+    return ok(_serialize(doc))
+
+
+@bp.patch("/documents/<document_id>")
+@admin_required
+def update_document(document_id: str):
+    """修改文档的版本元数据（M6）。
+
+    **为什么单开一个接口**
+
+    `published_at` / `academic_year` / `effective_status` 三列 M3 建表时就有，但只在
+    **上传那一刻**能写。上传时忘了标，之后没有任何入口能补——而删掉重传会换
+    `document_id`，挂在旧 id 上的已复核规则、历史会话引用全部作废。版本冲突检测
+    （T-12）恰恰依赖这三项，所以补一个"只改元数据、不碰文件与片段"的接口。
+
+    **为什么只更新请求里出现的键**
+
+    前端"只改有效状态"时不会带 `title`。若把缺失键当成空值写回，标题会被清空，
+    而列表页的标题同时是检索召回后的展示名——这种覆盖式更新很难被发现。
+    """
+    doc = _get_active_or_404(document_id)
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        raise InvalidParam("请求体必须是 JSON 对象")
+
+    if "title" in data:
+        title = optional_text(data.get("title"), "title")
+        if not title:
+            raise InvalidParam("title 不能为空")
+        doc.title = title
+    for field in ("department", "academic_year", "version_label", "scope_note"):
+        if field in data:
+            setattr(doc, field, optional_text(data.get(field), field))
+    if "published_at" in data:
+        doc.published_at = optional_date(data.get("published_at"))
+    if "effective_status" in data:
+        # 清空等于"未标注"，不是"沿用旧值"：把状态改回 unknown 是正当操作
+        doc.effective_status = effective_status(data.get("effective_status"))
+
+    doc.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    # 只记"改了哪几个字段"，不记值：元数据里可能带部门等内部信息，
+    # 审计日志要的是可追溯，不是副本。
+    _audit("document.update", "document", doc.id, json.dumps({"fields": sorted(data)}))
+    db.session.commit()
     return ok(_serialize(doc))
 
 

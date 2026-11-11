@@ -292,6 +292,42 @@ def run_match(document_id: str, payload: dict, user) -> dict:
                      "total_rules": len(rules)},
         )
 
+    # ---------- 按奖项过滤（M6，补 M5 登记的缺口）----------
+    # 同一份《奖学金评审办法》里常同时写着励志奖学金（绩点 ≥ 3.0）与优秀学生奖学金
+    # （绩点 ≥ 3.5）两套条件。不区分奖项时，一个绩点 3.2 的励志申请人会被优秀奖学金
+    # 那条判成"不符合"——判错了人，而且理由看着还挺有理有据。
+    # 规则没有标注 target_group 时一律保留：它是通用条件（如"须为在籍本科生"）。
+    filtered_out = 0
+    if data.target_group:
+        target = data.target_group.strip()
+        kept = [
+            r for r in conditions
+            if not (r.target_group or "").strip()
+            or (r.target_group or "").strip() == target
+        ]
+        filtered_out = len(conditions) - len(kept)
+        # 通用规则不能替某个奖项"背书"：如果一条明确标注该奖项的规则都没有，
+        # 只剩通用规则也说明"这份文件里没写这个奖项的条件"。
+        # 此时返回"1 符合"会让申请人以为自己的奖项稳了——比报错更危险。
+        specific = [r for r in kept if (r.target_group or "").strip() == target]
+        if not specific:
+            raise RulesNotReady(
+                f"该文件里没有针对「{data.target_group}」的已复核条件规则；"
+                f"现有 {len(conditions)} 条条件规则里没有一条标注这个奖项，"
+                f"请改选奖项或补充规则",
+                payload={
+                    "document_id": document.id,
+                    "target_group": data.target_group,
+                    "approved_rules": 0,
+                    "condition_rules": len(conditions),
+                    "generic_rules": len(kept),
+                    "available_groups": sorted(
+                        {r.target_group for r in conditions if (r.target_group or "").strip()}
+                    ),
+                },
+            )
+        conditions = kept
+
     profile = data.profile.model_dump(exclude_none=True)
     chunk_ids = {r.chunk_id for r in conditions}
     chunks = {
@@ -361,6 +397,10 @@ def run_match(document_id: str, payload: dict, user) -> dict:
             "unknown": session.sum_unknown,
             "total": session.sum_met + session.sum_not_met + session.sum_unknown,
         },
+        # 过滤了多少条、按什么奖项过滤的必须回传：否则"为什么只有 5 条"无从解释，
+        # 而用户会以为自己漏填了信息。
+        "target_group": data.target_group,
+        "filtered_out": filtered_out,
         "items": items,
         "disclaimer": DISCLAIMER,
         "created_at": session.created_at.isoformat() + "Z",

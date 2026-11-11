@@ -107,6 +107,17 @@ class RulesNotReady(ApiError):
     code = codes.RULES_NOT_READY
 
 
+# ---------- M6：消息与工作流 ----------
+class MessageNotFound(ApiError):
+    """消息或工作流记录不存在。
+
+    与 `DocumentNotFound` 分开，是为了让"点开一条已删除的答案反馈"报出准确的
+    对象类型——都报"文档不存在"会让用户去查文档列表，而问题在消息上。
+    """
+
+    code = codes.MESSAGE_NOT_FOUND
+
+
 # ---------- 权限 ----------
 class Unauthenticated(ApiError):
     code = codes.UNAUTHENTICATED
