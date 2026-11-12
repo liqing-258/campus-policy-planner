@@ -101,9 +101,16 @@ def rmtree_retry(path: Path, attempts: int = 8, delay: float = 0.6) -> bool:
 
 
 def snapshot(folder: Path) -> dict[str, int]:
+    """记录交付目录的文件集合与大小，用来断言"跑完没被写脏"。
+
+    跳过 SQLite 的 `-shm` / `-wal`：只要进程以 WAL 方式打开过库，这两个附产物就会被创建
+    或改变大小，哪怕全程只读。把它们算进比对，会让"污染检查"变成**随机失败**——
+    库本来有 shm 时通过，删掉后就失败。这条是踩到之后补的，不是预防性设计。
+    """
     return {
         str(p.relative_to(folder)): (p.stat().st_size if p.is_file() else -1)
         for p in sorted(folder.rglob("*"))
+        if not p.name.endswith(("-shm", "-wal"))
     }
 
 
