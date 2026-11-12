@@ -1,8 +1,14 @@
-"""打包后自检：在**系统临时目录**里真跑一遍交付物，跑两个场景。
+"""打包后自检：在**系统临时目录**里真跑一遍交付物，跑三个场景。
 
 场景 A「裸 exe」：沙箱里只放 exe —— 验证首次运行能自己建表、写演示账号、导入示例政策。
 场景 B「带库交付」：沙箱里放 exe + dist/data/ —— 验证真正要交出去的那一份能直接打开，
-                  知识库里是 5 份政策 / 6 条任务，而不是空库。
+                  知识库里是 18 份政策 / 11 条任务，而不是空库。
+场景 C「当服务跑」：用 `--port` 起在空闲端口上，真实调 `/retrieval/search` ——
+                  验证**功能真的进了这个包**，而不只是"能启动、能登录"。
+
+为什么加场景 C：A/B 都只证明"启动成功、账号能登、库非空"。后端代码改过之后，
+这三个断言在新旧两个包上**一模一样地通过**——旧包没有相邻片段补全，照样全绿。
+要证明发出去的包里含某项能力，只能对着这个包调一次那个能力。
 
 为什么不在 dist/ 里跑：数据库按设计落在 exe 同级 `data/`。在交付目录里跑一次，
 交付目录就会多出一份测试数据，拷给别人的那份就带着我的演示痕迹。所以复制到临时沙箱，
@@ -17,12 +23,16 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from ctypes import wintypes
 from pathlib import Path
 
@@ -151,6 +161,96 @@ def check_common(text: str, code: int, label: str, failures: list[str]) -> None:
             failures.append(f"{label}：输出里没有「{needle}」")
 
 
+def free_port(start: int = 5099, tries: int = 20) -> int:
+    for port in range(start, start + tries):
+        with socket.socket() as sock:
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError(f"{start}–{start + tries} 都占着，找不到空闲端口")
+
+
+def http_json(method: str, url: str, payload: dict | None = None,
+              token: str | None = None, timeout: float = 15.0):
+    body = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=body, method=method, headers={
+        "Content-Type": "application/json",
+        **({"Authorization": f"Bearer {token}"} if token else {}),
+    })
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.status, json.loads(resp.read().decode())
+
+
+def run_feature_case(failures: list[str]) -> Path | None:
+    """场景 C：把 exe 当服务起起来，调一次只有新代码才答得出的检索。"""
+    sandbox = Path(tempfile.mkdtemp(prefix="zx_exe_feature_"))
+    exe_src = DIST / f"{NAME}.exe"
+    shutil.copy2(exe_src, sandbox / exe_src.name)
+    src = DIST / "data"
+    if src.is_dir():
+        shutil.copytree(src, sandbox / "data")
+
+    port = free_port()
+    base = f"http://127.0.0.1:{port}"
+    log = sandbox / "server.log"
+    print(f"\n[自检] 场景 C 当服务跑 · 端口 {port} · 沙箱 {sandbox}")
+    proc = None
+    try:
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1", PORT=str(port))
+        with log.open("wb") as fh:
+            proc = subprocess.Popen(
+                [str(sandbox / exe_src.name), "--port", str(port), "--no-browser"],
+                cwd=str(sandbox), stdout=fh, stderr=subprocess.STDOUT, env=env,
+                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            )
+            health = None
+            deadline = time.time() + 90
+            while time.time() < deadline:
+                try:
+                    _, health = http_json("GET", f"{base}/api/v1/health", timeout=3)
+                    break
+                except (urllib.error.URLError, ConnectionError, OSError):
+                    time.sleep(0.8)
+            if not health:
+                failures.append("场景 C：90 秒内没起来（/api/v1/health 一直不通）")
+                return sandbox
+
+            data = health["data"]
+            print(f"[自检] 场景 C /health → {data['document_count']} 份 / {data['chunk_count']} 片段")
+
+            _, login = http_json("POST", f"{base}/api/v1/auth/login",
+                                 {"username": "student", "password": "student123"})
+            token = login["data"]["token"]
+
+            # 这条问法在"只有单一证据窗口"的旧代码上会被拒答（4001）；
+            # 新代码靠相邻片段补全把它捞回来，补进来的片段带 via_neighbour=true。
+            _, found = http_json("POST", f"{base}/api/v1/retrieval/search",
+                                 {"query": "图书馆的书逾期了怎么收费", "top_k": 8}, token=token)
+            body = found["data"]
+            cands = body.get("candidates") or []
+            extra = [c for c in cands if c.get("via_neighbour")]
+            print(f"[自检] 场景 C 检索 → refused={body.get('refused')} 候选 {len(cands)} 条 · "
+                  f"补全 {len(extra)} 条")
+            if body.get("refused"):
+                failures.append("场景 C：这条问法被拒答了——包里的检索没有相邻片段补全")
+            if not extra:
+                failures.append("场景 C：候选里没有 via_neighbour=true 的片段——"
+                                "要么补全没生效，要么打的是旧包")
+    except (urllib.error.URLError, KeyError, ValueError) as exc:
+        failures.append(f"场景 C：调用失败 {exc!r}")
+    finally:
+        if proc is not None and proc.poll() is None:
+            kill_tree(proc.pid, NAME, sandbox)
+        time.sleep(0.6)
+        raw = log.read_bytes() if log.exists() else b""
+        if raw:
+            for line in decode(raw).splitlines()[-6:]:
+                print("   ", line)
+    return sandbox
+
+
 def main() -> int:
     exe_src = DIST / f"{NAME}.exe"
     if not exe_src.is_file():
@@ -197,6 +297,12 @@ def main() -> int:
     else:
         failures.append("dist/data/app.db 不存在，交付目录缺少演示库")
 
+    # ---- 场景 C：当服务跑，验证"新功能真的在这个包里" ----
+    if (DIST / "data" / "app.db").is_file():
+        box_c = run_feature_case(failures)
+        if box_c is not None:
+            rmtree_retry(box_c)
+
     after = snapshot(DIST)
     if before != after:
         added = set(after) - set(before)
@@ -210,7 +316,7 @@ def main() -> int:
         for item in failures:
             print("  -", item)
         return 1
-    print("\n[自检] exe 两个场景均通过")
+    print("\n[自检] exe 三个场景均通过")
     return 0
 
 
