@@ -42,20 +42,26 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 h1 { font-size: 19pt; margin: 0 0 4pt; letter-spacing: .5pt; }
-h2 { font-size: 15pt; margin: 16pt 0 6pt; padding-bottom: 3pt; border-bottom: 1.2pt solid #2b6cb0; color: #1a365d; }
-h3 { font-size: 12.5pt; margin: 11pt 0 4pt; color: #2b4a6f; }
+h2 { font-size: 15pt; margin: 16pt 0 6pt; padding-bottom: 3pt; border-bottom: 1.2pt solid #2b6cb0; color: #1a365d;
+     page-break-after: avoid; }
+h3 { font-size: 12.5pt; margin: 11pt 0 4pt; color: #2b4a6f; page-break-after: avoid; }
+h4 { page-break-after: avoid; }
+table, pre, blockquote { page-break-inside: avoid; }
 h1 + h2 { margin-top: 6pt; }
 p { margin: 5pt 0; text-align: justify; }
 ul, ol { margin: 5pt 0 5pt 0; padding-left: 18pt; }
 li { margin: 2.5pt 0; }
 table { width: 100%; border-collapse: collapse; margin: 8pt 0; font-size: 10pt; page-break-inside: auto; }
 th, td { border: .6pt solid #b9c2cc; padding: 3.2pt 4.5pt; vertical-align: top; line-height: 1.5; }
-th { background: #eef3f9; font-weight: 600; }
+th { background: #eef3f9; font-weight: 600; white-space: nowrap; }
 tr { page-break-inside: avoid; }
+table.two td:first-child { width: 38%; }
+table.two td { word-break: break-all; }
 code { font-family: Consolas, "Courier New", monospace; font-size: 9pt;
        background: #f2f4f7; padding: 0 2pt; border-radius: 2pt; }
 pre { background: #f7f9fb; border-left: 2.4pt solid #2b6cb0; padding: 6pt 8pt;
       overflow: hidden; page-break-inside: avoid; margin: 6pt 0; }
+pre code { white-space: pre-wrap; word-break: break-all; }
 pre code { background: none; font-size: 8.6pt; line-height: 1.5; }
 blockquote { margin: 6pt 0; padding: 4pt 9pt; border-left: 2.4pt solid #a8b6c6;
              background: #fafbfc; color: #33404d; font-size: 9.6pt; }
@@ -124,7 +130,8 @@ def render(md: str) -> str:
                 body.append(split_row(lines[i]))
                 i += 1
             cols = len(head)
-            out.append("<table><thead><tr>"
+            cls = " class=\"two\"" if cols == 2 else ""
+            out.append(f"<table{cls}><thead><tr>"
                        + "".join(f"<th>{inline(c)}</th>" for c in head)
                        + "</tr></thead><tbody>")
             for row in body:
