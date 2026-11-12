@@ -474,6 +474,8 @@ curl -X POST http://127.0.0.1:5000/api/v1/qa/ask ^
 .venv\Scripts\python.exe tools\verify_exe.py      # M7：exe 双场景自检（裸 exe + 带库交付）
 .venv\Scripts\python.exe tools\browser_check.py   # M7：7 页真实渲染巡检（需先起服务）
 .venv\Scripts\python.exe tools\repro_check.py     # M7：干净树 10 分钟复现门禁（约 6 分钟）
+.venv\Scripts\python.exe tools\md_to_pdf.py "docs\70-提交版\技术文档（提交版·30页）.md"
+                                                 # M7：提交版 markdown → A4 PDF，并数出真实页数
 ```
 
 > **M7 的四个脚本都不在 pytest 里**，因为它们验的是 pytest 验不到的东西：
@@ -1007,7 +1009,8 @@ AI 生成的任务可能遗漏或过度解读。让用户先看、先改、再�
 
 | 文档 | 说明 |
 | --- | --- |
-| `docs/70-提交版/技术文档（提交版·30页）.md` | **提交用技术文档**：9 章，按赛事 30 页上限压缩（约 17 页），每个数字都附复核命令 |
+| `docs/70-提交版/技术文档（提交版·30页）.md` | **提交用技术文档**：9 章，按赛事 30 页上限压缩，每个数字都附复核命令 |
+| `docs/70-提交版/技术文档（提交版·30页）.pdf` | **同上，PDF 实测 13 页**（`tools/md_to_pdf.py` 生成，不是按字数估的） |
 | `docs/00-合规与提交/比赛合规清单.md` | 赛题规则、6 项提交材料、7 条红线、11 天倒排、提交核对表 |
 | `docs/00-合规与提交/提交材料清单.md` | **6 项材料制作台账**：规格、产出位置、完成判据、截止日、11-18 当天动作序列 |
 | `docs/00-合规与提交/风险登记表.md` | 16 条风险 × 状态 × 复查点、P0 信号监控、状态变更记录 |
