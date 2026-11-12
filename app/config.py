@@ -14,7 +14,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from app.paths import resource_root, writable_root
+
+# 可写根：源码运行时是项目根目录，打包后是 exe 所在目录。
+# 数据库、上传件一律以此为基准，绝不落进单文件 exe 的临时解压目录。
+PROJECT_ROOT = writable_root()
+# 只读资源根：打包后指向 _MEIPASS（前端 dist、demo 示例文件都在这里）
+RESOURCE_ROOT = resource_root()
 PLACEHOLDER_SECRET = "please-replace-with-a-random-32-byte-hex"
 
 
@@ -59,15 +65,18 @@ class Settings:
     """一次实例化的运行时配置。测试可用 overrides 覆盖任意字段。"""
 
     def __init__(self, overrides: dict | None = None) -> None:
-        # 只在首次构造时加载 .env；已存在的进程环境变量优先级更高（load_dotenv 默认不覆盖）
+        # 只在首次构造时加载 .env；已存在的进程环境变量优先级更高（load_dotenv 默认不覆盖）。
+        # 两个位置都看：exe 同级（用户自己放，便于换密钥）优先，其次打包内资源目录。
         load_dotenv(PROJECT_ROOT / ".env", override=False)
+        if RESOURCE_ROOT != PROJECT_ROOT:
+            load_dotenv(RESOURCE_ROOT / ".env", override=False)
 
         self.app_env = _str("APP_ENV", "dev")
         self.log_level = _str("LOG_LEVEL", "INFO").upper()
         self.host = _str("HOST", "127.0.0.1")
         self.port = _int("PORT", 5000)
-        # 版本号随里程碑前进：M2 = 0.2.0，M3 = 0.3.0，M4 = 0.4.0，以此类推
-        self.version = _str("APP_VERSION", "0.6.0")
+        # 版本号随里程碑前进：M2 = 0.2.0 … M6 = 0.6.0，M7 收尾 = 0.7.0
+        self.version = _str("APP_VERSION", "0.7.0")
 
         # --- 数据库 ---
         self.database_url = _str("DATABASE_URL", "sqlite:///./data/app.db")

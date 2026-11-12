@@ -77,16 +77,44 @@ def create_app(overrides: dict | None = None) -> Flask:
 
 
 def _register_root_route(app: Flask) -> None:
-    """根路径给一句人类可读的说明，避免评审打开 5000 端口看到裸 404。"""
+    """根路径：有前端构建产物就托管它，没有就回一句人类可读的 JSON 说明。
+
+    **为什么打包版必须托管前端**：交付给别人的是一份 exe，不可能让人再装 node 跑 `vite dev`。
+    前端用 history 路由（/plans 这类地址），所以非资源路径要回落到 index.html；
+    但 `/api/*` 的 404 必须仍然是 JSON——把 HTML 当 JSON 返回，前端会报"解析失败"，
+    真正的原因（接口不存在）反而被掩盖。
+    """
+    from flask import abort, send_from_directory
+
+    from app import paths
+
+    dist = paths.frontend_dist()
+
+    if dist is None:
+
+        @app.get("/")
+        def root_json():
+            return jsonify({
+                "name": "知校 · 校园政策智能理解与事务规划系统",
+                "api": API_PREFIX,
+                "health": f"{API_PREFIX}/health",
+                "hint": "前端未构建：cd frontend && npm run build 后重启，根路径会自动托管页面",
+                "docs": "https://github.com/liqing-258/campus-policy-planner",
+            })
+
+        return
 
     @app.get("/")
-    def root():
-        return jsonify({
-            "name": "知校 · 校园政策智能理解与事务规划系统",
-            "api": API_PREFIX,
-            "health": f"{API_PREFIX}/health",
-            "docs": "https://github.com/liqing-258/campus-policy-planner",
-        })
+    def root_index():
+        return send_from_directory(dist, "index.html")
+
+    @app.get("/<path:filename>")
+    def static_or_spa(filename: str):
+        if filename.startswith("api/"):
+            abort(404)
+        if (dist / filename).is_file():
+            return send_from_directory(dist, filename)
+        return send_from_directory(dist, "index.html")
 
 
 def _configure_logging(app: Flask, settings: Settings) -> None:
