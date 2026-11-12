@@ -494,6 +494,8 @@ curl -X POST http://127.0.0.1:5000/api/v1/qa/ask ^
 .venv\Scripts\python.exe tools\e2e_gate.py        # M3 端到端 10 项（M3 交付，仍应全过）
 .venv\Scripts\python.exe tools\verify_exe.py      # M7：exe 三场景自检（裸 exe / 带库交付 / 当服务跑）
 .venv\Scripts\python.exe tools\browser_check.py   # M7：7 页真实渲染巡检（需先起服务）
+.venv\Scripts\python.exe tools\exe_ui_check.py   # R2：对着 exe 自己跑一遍 7 页巡检（沙箱内起服务）
+.venv\Scripts\python.exe tools\kb_probe.py       # R2：18 份政策各问一句，验"每份都能被问到"（约 30 秒）
 .venv\Scripts\python.exe tools\repro_check.py     # M7：干净树 10 分钟复现门禁（约 6 分钟）
 .venv\Scripts\python.exe tools\md_to_pdf.py "docs\70-提交版\技术文档（提交版·30页）.md"
                                                  # M7：提交版 markdown → A4 PDF，并数出真实页数
