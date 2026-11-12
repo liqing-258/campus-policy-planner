@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from app import injection, versions
 from app.indexing import ensure_index_loaded, get_index
@@ -44,6 +44,12 @@ class Candidate:
     # 降权前的覆盖率。只有命中注入模式时才有值——否则 `coverage` 就是原值，
     # 多存一个字段只会让人怀疑"是不是还有别的地方也在改分数"。
     raw_coverage: float | None = None
+    # 不是检索直接命中的，而是作为命中片段的"紧邻片段"补进来的。
+    # 为什么要标出来：它同样过了覆盖率闸门，但排序上被别的片段挤掉了——
+    # 标出来，评审追问"这条哪来的"时有话可说，而不是看起来像凭空多出来的证据。
+    via_neighbour: bool = False
+    # 片段在文件内的序号，补邻片时用它找前后邻居
+    chunk_index: int = 0
 
     def to_public(self, *, with_content: bool = True) -> dict:
         """对外序列化。内容可截断——列表场景不需要整段正文，详情接口才需要。"""
@@ -56,6 +62,8 @@ class Candidate:
             "section_title": self.section_title,
             "score": self.score,
             "coverage": self.coverage,
+            # 前端不必为它加图标，但接口里要能看出来：这条是"紧邻补全"，不是直接命中
+            "via_neighbour": self.via_neighbour,
         }
         if self.injection_hits:
             payload["injection"] = {
@@ -85,6 +93,8 @@ class RetrievalOutcome:
     # M6：同一主题的多版本（T-12）与疑似注入汇总（T-11）
     conflicts: list[dict] = field(default_factory=list)
     injection_suspected: list[dict] = field(default_factory=list)
+    # R2：补进来的相邻片段条数（0 表示本轮没触发）
+    neighbour_added: int = 0
 
     def to_public(self, *, with_content: bool = True) -> dict:
         return {
@@ -106,6 +116,86 @@ def retrieval_mode() -> str:
     if settings.embedding_api_key and settings.embedding_model:
         return EMBEDDING_VECTOR
     return EMBEDDING_BM25_ONLY
+
+
+# ---------- 相邻片段补全 ----------
+# 补几个父片段的邻居、最多补几条。数字不大是刻意的：
+# 补全只解决"条款被同文件的其它章节挤出窗口"，不负责把证据塞满。
+NEIGHBOUR_PARENTS = 3
+NEIGHBOUR_LIMIT = 3
+
+
+def _complete_neighbours(query: str, top: list[Candidate], passed: list[Candidate],
+                         index, threshold: float,
+                         outcome: RetrievalOutcome) -> list[Candidate]:
+    """把"过了闸门但被排序挤掉"的相邻片段补进证据。
+
+    为什么需要这一步（R2 实测的现场）：
+
+        《图书馆借阅与自习空间管理办法》补到 7 个片段后，问
+        「图书馆的书逾期了怎么收费」，含逾期费条款的「第二章 借阅规则」
+        只覆盖 2/5 个查询词（0.4），而新增的电子资源、座位管理几章覆盖 0.6/0.8。
+        `search()` 先按覆盖率排序，于是第二章排到第 11 位，前 6 条里没有它，
+        模型看到六段都不讲钱，只能拒答——而原文白纸黑字写着 0.1 元/册/天。
+
+    它和"降阈值"的区别：**闸门一条没松**。补进来的片段必须自己也算出
+    `coverage >= threshold`，也就是"本来就够格、只是没抢到座"。
+    真正该拒的问题（库里没有）不会有任何片段过闸，这一步就不会触发。
+    """
+    if not top:
+        return []
+    # 只排除"已经进了证据窗口"的片段。注意不能拿整个 passed 当排除表——
+    # 被补的邻片本来就在 passed 里（它过了闸、只是排序靠后），
+    # 早先按 passed 排除，结果一条都补不进来，neighbour_added 恒为 0。
+    taken = {c.chunk_id for c in top}
+    already = {c.chunk_id: c for c in passed}
+    extras: dict[str, Candidate] = {}
+    for parent in top[:NEIGHBOUR_PARENTS]:
+        for chunk in index.neighbours(parent.document_id, parent.chunk_index):
+            if chunk.chunk_id in taken:
+                continue
+            reused = already.get(chunk.chunk_id)
+            if reused is not None:
+                # 已经在 passed 里：沿用它的注入标记与覆盖率，只补一个"来源"标记
+                candidate = replace(reused, via_neighbour=True)
+            else:
+                hit = index.score_chunk(query, chunk.chunk_id)
+                if hit is None or hit.score <= 0:
+                    continue
+                found = injection.scan(hit.content)
+                coverage = injection.downweight(hit.coverage) if found else hit.coverage
+                if found:
+                    outcome.injection_suspected.append({
+                        "chunk_id": hit.chunk_id,
+                        "document_title": hit.document_title,
+                        "patterns": [h["code"] for h in found],
+                        "original_coverage": round(hit.coverage, 4),
+                        "adjusted_coverage": coverage,
+                        "kept": True,
+                        "via": "neighbour",
+                    })
+                candidate = Candidate(
+                    index=0,
+                    chunk_id=hit.chunk_id,
+                    document_id=hit.document_id,
+                    document_title=hit.document_title,
+                    content=hit.content,
+                    page_number=hit.page_number,
+                    section_title=hit.section_title,
+                    score=hit.score,
+                    coverage=coverage,
+                    matched_terms=tuple(hit.matched_terms),
+                    injection_hits=tuple(found),
+                    raw_coverage=hit.coverage if found else None,
+                    via_neighbour=True,
+                    chunk_index=hit.chunk_index,
+                )
+            if candidate.coverage < threshold:
+                continue  # 邻片自己也得过闸，不然补进来的就是"凑数证据"
+            taken.add(chunk.chunk_id)
+            extras[chunk.chunk_id] = candidate
+    ordered = sorted(extras.values(), key=lambda c: (c.coverage, c.score), reverse=True)
+    return ordered[:NEIGHBOUR_LIMIT]
 
 
 def retrieve(query: str, *, top_k: int | None = None,
@@ -166,6 +256,7 @@ def retrieve(query: str, *, top_k: int | None = None,
             matched_terms=tuple(hit.matched_terms),
             injection_hits=tuple(found),
             raw_coverage=hit.coverage if found else None,
+            chunk_index=hit.chunk_index,
         )
         if found:
             outcome.injection_suspected.append({
@@ -182,10 +273,13 @@ def retrieve(query: str, *, top_k: int | None = None,
             rejected.append(candidate)
 
     # 重新编 1..N：模型看到的编号必须连续，否则"编号越界"的判定会失去意义
-    for new_index, candidate in enumerate(passed[:limit], 1):
+    top = passed[:limit]
+    extras = _complete_neighbours(query, top, passed, index, threshold, outcome)
+    for new_index, candidate in enumerate(top + extras, 1):
         candidate.index = new_index
-    outcome.candidates = passed[:limit]
+    outcome.candidates = top + extras
     outcome.rejected = rejected[:limit]
+    outcome.neighbour_added = len(extras)
 
     if not outcome.candidates:
         outcome.refused = True

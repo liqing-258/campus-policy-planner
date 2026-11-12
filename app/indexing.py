@@ -114,6 +114,9 @@ class IndexedChunk:
     content: str
     page_number: int | None
     section_title: str | None
+    # 片段在文件内的序号。只用于"补相邻片段"——政策文件的上下文常跨段，
+    # 但命中段落单独看又不够，需要知道谁挨着谁。
+    chunk_index: int = 0
     term_freq: Counter = field(default_factory=Counter)
     length: int = 0
 
@@ -130,6 +133,7 @@ class SearchHit:
     # 命中查询词项的比例（0~1）。M4 的拒答判断主要依赖它，而不是 score——理由见 search() 文档串。
     coverage: float = 0.0
     matched_terms: tuple[str, ...] = ()
+    chunk_index: int = 0
 
 
 class Bm25Index:
@@ -138,6 +142,7 @@ class Bm25Index:
     def __init__(self) -> None:
         self._chunks: list[IndexedChunk] = []
         self._df: Counter = Counter()
+        self._by_id: dict[str, IndexedChunk] = {}
         self._avg_len = 0.0
         self._built_at: float | None = None
         self._build_ms = 0.0
@@ -150,6 +155,9 @@ class Bm25Index:
         chunks: list[IndexedChunk] = []
         df: Counter = Counter()
         total_len = 0
+        # 调用方没给 chunk_index 时按文件内出现顺序补一个。
+        # 不能让所有人默认 0：那样 `neighbours()` 会把整份文件都当成"紧邻"。
+        fallback_index: Counter = Counter()
 
         for row in rows:
             tokens = tokenize(row["content"])
@@ -159,13 +167,19 @@ class Bm25Index:
                 freq[token] += SECTION_TITLE_BOOST
             if not freq:
                 continue
+            document_id = row["document_id"]
+            position = row.get("chunk_index")
+            if position is None:
+                position = fallback_index[document_id]
+            fallback_index[document_id] = max(fallback_index[document_id], int(position) + 1)
             chunks.append(IndexedChunk(
                 chunk_id=row["chunk_id"],
-                document_id=row["document_id"],
+                document_id=document_id,
                 document_title=row.get("document_title") or "",
                 content=row["content"],
                 page_number=row.get("page_number"),
                 section_title=row.get("section_title"),
+                chunk_index=int(position),
                 term_freq=freq,
                 length=len(tokens),
             ))
@@ -176,6 +190,7 @@ class Bm25Index:
         with self._lock:
             self._chunks = chunks
             self._df = df
+            self._by_id = {chunk.chunk_id: chunk for chunk in chunks}
             self._avg_len = (total_len / len(chunks)) if chunks else 0.0
             self._built_at = time.time()
             self._build_ms = (time.perf_counter() - started) * 1000
@@ -185,6 +200,7 @@ class Bm25Index:
         with self._lock:
             self._chunks = []
             self._df = Counter()
+            self._by_id = {}
             self._avg_len = 0.0
             self._built_at = None
 
@@ -230,31 +246,15 @@ class Bm25Index:
         if not terms or not self._chunks:
             return []
 
-        unique_terms = list(dict.fromkeys(terms))  # 去重且保序，覆盖率分母用它
-        total = len(self._chunks)
-        idf = {}
-        for term in unique_terms:
-            df = self._df.get(term, 0)
-            # 加一平滑，避免 df=0 时除零与负分
-            idf[term] = math.log(1 + (total - df + 0.5) / (df + 0.5))
-
+        unique_terms, idf = self._query_stats(terms)
         allowed = set(document_ids) if document_ids else None
         hits: list[SearchHit] = []
         for chunk in self._chunks:
             if allowed and chunk.document_id not in allowed:
                 continue
-            score = 0.0
-            matched: list[str] = []
-            norm = K1 * (1 - B + B * chunk.length / (self._avg_len or 1))
-            for term in unique_terms:
-                freq = chunk.term_freq.get(term, 0)
-                if not freq:
-                    continue
-                matched.append(term)
-                score += idf[term] * freq * (K1 + 1) / (freq + norm)
+            score, coverage, matched = self._score(chunk, unique_terms, idf)
             if score <= 0:
                 continue
-            coverage = len(matched) / len(unique_terms)
             if score < min_score or coverage < min_coverage:
                 continue
             hits.append(SearchHit(
@@ -267,11 +267,78 @@ class Bm25Index:
                 score=round(score, 4),
                 coverage=round(coverage, 4),
                 matched_terms=tuple(matched),
+                chunk_index=chunk.chunk_index,
             ))
 
         # 先按覆盖率、再按分数：覆盖更全的片段通常更贴合问题整体，而不只是撞上一个罕见词
         hits.sort(key=lambda h: (h.coverage, h.score), reverse=True)
         return hits[:top_k]
+
+    # ---------- 单片段打分与邻片定位 ----------
+    def _query_stats(self, terms: list[str]) -> tuple[list[str], dict[str, float]]:
+        """查询词去重 + idf。覆盖率的分母是去重后的词项数。"""
+        unique_terms = list(dict.fromkeys(terms))
+        total = len(self._chunks)
+        idf = {}
+        for term in unique_terms:
+            df = self._df.get(term, 0)
+            # 加一平滑，避免 df=0 时除零与负分
+            idf[term] = math.log(1 + (total - df + 0.5) / (df + 0.5))
+        return unique_terms, idf
+
+    def _score(self, chunk: IndexedChunk, unique_terms: list[str],
+               idf: dict[str, float]) -> tuple[float, float, list[str]]:
+        score = 0.0
+        matched: list[str] = []
+        norm = K1 * (1 - B + B * chunk.length / (self._avg_len or 1))
+        for term in unique_terms:
+            freq = chunk.term_freq.get(term, 0)
+            if not freq:
+                continue
+            matched.append(term)
+            score += idf[term] * freq * (K1 + 1) / (freq + norm)
+        coverage = len(matched) / len(unique_terms) if unique_terms else 0.0
+        return score, coverage, matched
+
+    def score_chunk(self, query: str, chunk_id: str) -> SearchHit | None:
+        """按与 `search()` 完全相同的口径，给单个片段打分。
+
+        为什么要公开这一步：补相邻片段时不能拍一个分数上去，
+        否则"这条邻片够不够格"就变成了另一套标准，覆盖率闸门形同虚设。
+        """
+        with self._lock:
+            chunk = self._by_id.get(chunk_id)
+            if chunk is None:
+                return None
+            unique_terms, idf = self._query_stats(tokenize(query))
+            if not unique_terms:
+                return None
+            score, coverage, matched = self._score(chunk, unique_terms, idf)
+            return SearchHit(
+                chunk_id=chunk.chunk_id,
+                document_id=chunk.document_id,
+                document_title=chunk.document_title,
+                content=chunk.content,
+                page_number=chunk.page_number,
+                section_title=chunk.section_title,
+                score=round(score, 4),
+                coverage=round(coverage, 4),
+                matched_terms=tuple(matched),
+                chunk_index=chunk.chunk_index,
+            )
+
+    def neighbours(self, document_id: str, chunk_index: int, span: int = 1) -> list[IndexedChunk]:
+        """同一文件里紧挨着的片段（前后各 span 个），按序号排序。"""
+        with self._lock:
+            return sorted(
+                (
+                    c for c in self._chunks
+                    if c.document_id == document_id
+                    and abs(c.chunk_index - chunk_index) <= span
+                    and c.chunk_index != chunk_index
+                ),
+                key=lambda c: c.chunk_index,
+            )
 
 
 # 进程级索引实例：脚本（无 app 上下文）与默认回退使用
@@ -300,6 +367,7 @@ def rebuild_index() -> dict:
         db.select(
             DocumentChunk.id, DocumentChunk.document_id, DocumentChunk.content,
             DocumentChunk.page_number, DocumentChunk.section_title, Document.title,
+            DocumentChunk.chunk_index,
         )
         .join(Document, Document.id == DocumentChunk.document_id)
         .where(Document.deleted_at.is_(None))
@@ -314,6 +382,7 @@ def rebuild_index() -> dict:
             "page_number": row[3],
             "section_title": row[4],
             "document_title": row[5],
+            "chunk_index": row[6],
         }
         for row in rows
     ]
