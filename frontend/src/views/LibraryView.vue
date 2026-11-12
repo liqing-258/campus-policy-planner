@@ -6,7 +6,8 @@
  * 「片段」是问答与匹配的证据单位，所以它必须能被直接看到——
  * 只给一个"片段数 6"而不给内容，用户无从判断切分是否合理。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { api, type ChunkRow, type DocumentRow, type Paged } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import {
@@ -18,6 +19,7 @@ import {
 } from '../utils/format'
 
 const auth = useAuthStore()
+const route = useRoute()
 
 const docs = ref<DocumentRow[]>([])
 const total = ref(0)
@@ -186,8 +188,40 @@ async function removeDoc(doc: DocumentRow) {
 const pages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const statusOptions = Object.keys(PARSE_STATUS)
 
-onMounted(loadDocs)
+/**
+ * 从问答页的「在知识库中打开」跳过来时带 `?doc=<id>`：
+ * 把那一行滚到视野中央并展开它的片段，否则用户落地在一张列表上，
+ * 还得自己找刚才引用的是哪一份。
+ */
+const highlightId = ref('')
+
+async function openFromQuery() {
+  const target = String(route.query.doc ?? '')
+  if (!target) return
+  highlightId.value = target
+  statusFilter.value = ''
+  keyword.value = ''
+  // 列表按创建时间倒序分页，目标文件不一定落在第 1 页——
+  // 演示库里最早导入的《奖学金评审办法》正好排在最后一页。
+  // 先取一次全量 id 定位页码，比"逐页翻着试"可靠。
+  try {
+    const all = await api.get<Paged<DocumentRow>>('/documents?page=1&page_size=100')
+    const index = all.items.findIndex((d) => d.id === target)
+    page.value = index >= 0 ? Math.floor(index / pageSize) + 1 : 1
+  } catch {
+    page.value = 1
+  }
+  await loadDocs()
+  const found = docs.value.find((d) => d.id === target)
+  if (!found) return
+  if (openDocId.value !== target) await toggleChunks(found)
+  await nextTick()
+  document.getElementById(`doc-${target}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+onMounted(openFromQuery)
 watch([page, statusFilter], loadDocs)
+watch(() => route.query.doc, openFromQuery)
 
 function search() {
   page.value = 1
@@ -294,7 +328,10 @@ function search() {
         </thead>
         <tbody>
           <template v-for="doc in docs" :key="doc.id">
-            <tr :class="{ active: openDocId === doc.id }">
+            <tr
+              :id="`doc-${doc.id}`"
+              :class="{ active: openDocId === doc.id, highlight: highlightId === doc.id }"
+            >
               <td>
                 <button class="link" @click="toggleChunks(doc)">{{ doc.title }}</button>
                 <div v-if="doc.parse_hint" class="muted tiny">{{ doc.parse_hint }}</div>
@@ -561,6 +598,12 @@ function search() {
 
 .table tr.active td {
   background: var(--c-primary-weak);
+}
+
+/* 从问答页带 ?doc= 跳进来时，这一行要一眼能认出来 */
+.table tr.highlight td {
+  background: var(--c-primary-weak);
+  box-shadow: inset 3px 0 0 var(--c-primary);
 }
 
 .num {

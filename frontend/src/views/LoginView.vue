@@ -20,7 +20,7 @@ const password = ref('student123')
 const health = ref<Health | null>(null)
 
 const features = [
-  '答案自带编号引用，点开即见原文与页码',
+  '解答自带编号引用，点开即见原文与页码',
   '资格判定分「符合 / 不符合 / 无法判定」，缺什么会明说',
   '计划里的每个截止日期都能追回来源条款',
   '同一政策存在新旧两版时并列提示，不替你选',
