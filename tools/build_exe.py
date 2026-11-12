@@ -219,8 +219,21 @@ def prepare_delivery(exe: Path, copy_data: bool) -> None:
         dst_dir = DIST / "data"
         dst_dir.mkdir(parents=True, exist_ok=True)
         if src_db.is_file():
+            # 先 checkpoint 再复制：WAL 模式下最近的事务可能还在 app.db-wal 里，
+            # 只 copy 主文件会安静地少掉最后几次写入（实测 chunks 少过 0 条只是运气好）。
+            try:
+                import sqlite3
+                con = sqlite3.connect(src_db)
+                con.execute("pragma wal_checkpoint(truncate)")
+                con.close()
+            except Exception as exc:  # 库被占用时不该让构建失败
+                print(f"[交付] ⚠ WAL checkpoint 失败（{exc}），复制结果可能落后几次写入")
             shutil.copyfile(src_db, dst_dir / "app.db")
+            stale = sorted(p.name for p in (ROOT / "data").iterdir()
+                           if p.is_file() and p.name.startswith("app.db.bak"))
             print(f"[交付] 已复制演示库 {src_db.stat().st_size / 1024:.0f} KB", flush=True)
+            if stale:
+                print(f"[交付] 注意：data/ 下有 {len(stale)} 个旧备份未随包分发（只复制 app.db + uploads/）")
         src_up = ROOT / "data" / "uploads"
         if src_up.is_dir():
             dst_up = dst_dir / "uploads"
