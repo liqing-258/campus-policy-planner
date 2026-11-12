@@ -72,6 +72,9 @@ type Field = {
   label: string
   hint: string
   type: string
+  /** 数值字段的取值范围：用于越界校验，也写进提示文字 */
+  min?: number
+  max?: number
   /** 枚举字段用下拉，避免用户照着英文枚举值猜怎么写 */
   options?: { value: string; label: string }[]
 }
@@ -82,12 +85,38 @@ type Field = {
  * 早先这里把后端枚举值直接写在 placeholder 里（`full_time_undergraduate` / `yes / no`），
  * 用户得猜"我该填什么才算数"。改成下拉 + 中文提示：选的是中文，提交的是后端认的值。
  * 留空仍然是"缺少信息"，不是"不符合"。
+ *
+ * 数值字段全部带 min/max：`type="number"` 只挡住键盘上的字母，
+ * 挡不住负号和 `1e9`——年级填 -4、绩点填 -1 都会原样进请求，
+ * 后端白名单只校验字段名不校验取值，最后变成一个荒谬的匹配结论。
+ * 所以数值框改成 text + inputmode，字符在输入时就过滤（见 onNumberInput）。
  */
 const fields: Field[] = [
-  { key: 'student_type', label: '学生类型', hint: '如：全日制在校本科生', type: 'text' },
-  { key: 'grade', label: '年级', hint: '1–8', type: 'number' },
-  { key: 'gpa', label: '平均学分绩点', hint: '0–5，如 3.2', type: 'number' },
-  { key: 'rank_percent', label: '专业排名百分比', hint: '0–100，越小越靠前', type: 'number' },
+  {
+    key: 'student_type',
+    label: '学生类型',
+    hint: '',
+    type: 'select',
+    options: [
+      { value: '全日制在校本科生', label: '全日制在校本科生' },
+      { value: '全日制在校专科生', label: '全日制在校专科生' },
+      { value: '全日制在校硕士研究生', label: '全日制在校硕士研究生' },
+      { value: '全日制在校博士研究生', label: '全日制在校博士研究生' },
+      { value: '非全日制研究生', label: '非全日制研究生' },
+      { value: '交换生', label: '交换生' },
+      { value: '旁听生', label: '旁听生' },
+    ],
+  },
+  { key: 'grade', label: '年级', hint: '1–8', type: 'number', min: 1, max: 8 },
+  { key: 'gpa', label: '平均学分绩点', hint: '0–5，如 3.2', type: 'number', min: 0, max: 5 },
+  {
+    key: 'rank_percent',
+    label: '专业排名百分比',
+    hint: '0–100，越小越靠前',
+    type: 'number',
+    min: 0,
+    max: 100,
+  },
   {
     key: 'poverty_certified',
     label: '家庭经济困难认定',
@@ -109,7 +138,14 @@ const fields: Field[] = [
     ],
   },
   { key: 'major', label: '专业', hint: '如：物联网工程', type: 'text' },
-  { key: 'credits_earned', label: '已修学分', hint: '如 120', type: 'number' },
+  {
+    key: 'credits_earned',
+    label: '已修学分',
+    hint: '0–300，如 120',
+    type: 'number',
+    min: 0,
+    max: 300,
+  },
   {
     key: 'enrollment_status',
     label: '学籍状态',
@@ -169,12 +205,87 @@ async function loadDocuments() {
   }
 }
 
+/**
+ * 读画像字段，永远拿到字符串。
+ *
+ * 这里必须兜一层 `String()`：数值框若用 `v-model` + `type="number"`，
+ * Vue 会把输入转成 number 写回，于是 `.trim()` / `.replace()` 直接 TypeError，
+ * 整个页面渲染树跟着崩掉——粘贴、密码管理器自动填充、脚本赋值都会踩中。
+ * 现在模板已改成 `:value` + 手写 `@input`（值始终是字符串），这个兜底留着防回归。
+ */
+function textOf(key: keyof typeof profile.value): string {
+  const v = profile.value[key] as string | number | null | undefined
+  return typeof v === 'string' ? v : String(v ?? '')
+}
+
+/**
+ * 数值框只接受数字与一个小数点：负号、字母、空格、第二个小数点在敲进来时就被抹掉。
+ *
+ * 为什么不交给 `type="number"`：它只挡字母，`-4`、`1e9`、粘贴值都照进；
+ * 而它的上下箭头是系统浅色控件，深色主题里既刺眼又没用（年级 1–8 键盘更快），
+ * 只能整个隐藏——那还不如一开始就用 text + inputmode，自己管字符。
+ */
+function onNumberInput(f: Field, event: Event) {
+  const el = event.target as HTMLInputElement
+  const raw = el.value
+  let next = raw.replace(/[^\d.]/g, '')
+  const dot = next.indexOf('.')
+  if (dot >= 0) {
+    next = next.slice(0, dot + 1) + next.slice(dot + 1).replace(/\./g, '')
+  }
+  // 只在真的改了字符时才回写 DOM：否则会把光标弹到末尾，
+  // 在中间插一位数字时光标乱跳。
+  if (next !== raw) el.value = next
+  profile.value[f.key] = next
+}
+
+/**
+ * 失焦时只统一"写法"，不动数值：`007` → `7`、`3.20` → `3.2`、`.5` → `0.5`。
+ *
+ * 越界值**故意不拉回边界**——把 99 悄悄改成 8 等于替用户编了一个年级，
+ * 用户还以为自己填的就是 8。越界就原样留着，由下面那行红字指出来。
+ */
+function normalizeNumber(f: Field) {
+  const raw = textOf(f.key).trim()
+  if (!raw) return
+  const value = Number(raw)
+  if (!Number.isFinite(value)) return
+  if (f.min !== undefined && value < f.min) return
+  if (f.max !== undefined && value > f.max) return
+  profile.value[f.key] = String(value)
+}
+
+/** 越界或非法的字段：列出来并禁用提交，而不是静默纠正成边界值 */
+const invalidFields = computed(() =>
+  fields
+    .filter((f) => {
+      if (f.type !== 'number') return false
+      const raw = textOf(f.key).trim()
+      if (!raw) return false
+      const value = Number(raw)
+      if (!Number.isFinite(value)) return true
+      if (f.min !== undefined && value < f.min) return true
+      if (f.max !== undefined && value > f.max) return true
+      return false
+    })
+    .map((f) => f.label),
+)
+
 function buildProfile(): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const f of fields) {
-    const raw = profile.value[f.key].trim()
+    const raw = textOf(f.key).trim()
     if (!raw) continue
-    out[f.key] = f.type === 'number' ? Number(raw) : raw
+    if (f.type === 'number') {
+      const value = Number(raw)
+      // 模板层已经挡了常见输入，这里再兜一次：粘贴、自动填充都能绕过模板
+      if (!Number.isFinite(value)) continue
+      if (f.min !== undefined && value < f.min) continue
+      if (f.max !== undefined && value > f.max) continue
+      out[f.key] = value
+    } else {
+      out[f.key] = raw
+    }
   }
   return out
 }
@@ -353,12 +464,33 @@ watch(documentId, () => {
             <option value="">未填写</option>
             <option v-for="opt in f.options" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
           </select>
-          <input v-else v-model="profile[f.key]" :type="f.type" :placeholder="f.hint" />
+          <input
+            v-else-if="f.type === 'number'"
+            :value="profile[f.key]"
+            type="text"
+            inputmode="decimal"
+            autocomplete="off"
+            :placeholder="f.hint"
+            :aria-invalid="invalidFields.includes(f.label)"
+            :class="{ bad: invalidFields.includes(f.label) }"
+            @input="onNumberInput(f, $event)"
+            @blur="normalizeNumber(f)"
+          />
+          <input v-else v-model="profile[f.key]" type="text" :placeholder="f.hint" />
         </label>
       </div>
 
+      <p v-if="invalidFields.length" class="invalid-line">
+        {{ invalidFields.join('、') }} 超出允许范围（年级 1–8、绩点 0–5、排名 0–100、学分 0–300），
+        请改正后再匹配——系统不会替你把越界值改成边界值。
+      </p>
+
       <div class="actions">
-        <button class="btn" :disabled="matching || !documentId" @click="runMatch">
+        <button
+          class="btn"
+          :disabled="matching || !documentId || invalidFields.length > 0"
+          @click="runMatch"
+        >
           {{ matching ? '比对中…' : '开始匹配' }}
         </button>
         <span class="muted tiny">不调用模型：同样的画像每次得到同样的结果。</span>
@@ -547,6 +679,23 @@ watch(documentId, () => {
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: var(--space-3);
   margin-top: var(--space-3);
+}
+
+/* 数值字段是 text + inputmode="decimal"，所以原生上下箭头压根不存在——
+   不用再跟系统浅色 spinner 对抗。这里只补两件事：等宽数字对齐、越界描边。 */
+.profile-grid input[inputmode="decimal"] {
+  font-variant-numeric: tabular-nums;
+}
+
+.profile-grid input.bad {
+  border-color: var(--c-not-met-border);
+}
+
+.invalid-line {
+  margin: var(--space-2) 0 0;
+  color: var(--c-not-met);
+  font-size: 12.5px;
+  line-height: 1.7;
 }
 
 .actions {
