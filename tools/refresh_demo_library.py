@@ -110,9 +110,48 @@ def scrub_text(value: str | None) -> str | None:
     return value.replace(_STALE_MARK, "")
 
 
+def prune_uploads(upload_dir: Path, dry_run: bool) -> None:
+    """删掉 `uploads/` 里不再被任何文档引用的物理文件。
+
+    为什么会有孤儿：重建分支每次都给新文档起一个新的 `stored_name`，
+    旧文档行删了，它那份物理文件却留在磁盘上。跑几轮刷新之后，
+    `uploads/` 里的文件数就是"库内引用数 × 轮数"——交付目录里一堆用不到的文件。
+
+    **默认不删**，要显式 `--prune-uploads`。理由：删文件是不可逆动作，
+    而"多留几个文件"最坏只是占点磁盘。只在两种情况下删：
+    名字在库里查不到，**且**文件名符合本项目的存储命名（ULID + 扩展名），
+    避免误删有人手工放进来的说明文件。
+    """
+    referenced = {
+        row[0] for row in db.session.execute(db.select(Document.stored_name)).all()
+    }
+    pattern = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}\.(pdf|docx|txt|md)$")
+    orphans = []
+    for path in upload_dir.iterdir():
+        if not path.is_file() or path.name in referenced:
+            continue
+        if not pattern.match(path.name):
+            continue
+        orphans.append(path)
+
+    if not orphans:
+        print("[prune] uploads/ 没有孤儿文件")
+        return
+    total = sum(p.stat().st_size for p in orphans)
+    if dry_run:
+        print(f"[dry] 将删除 {len(orphans)} 个孤儿文件（{total // 1024} KB）")
+        return
+    for path in orphans:
+        path.unlink()
+    print(f"[prune] 删除 {len(orphans)} 个孤儿文件（{total // 1024} KB），"
+          f"保留 {len(referenced)} 份在用文件")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="刷新开发库里的演示文档")
     parser.add_argument("--dry-run", action="store_true", help="只看会做什么，不写库")
+    parser.add_argument("--prune-uploads", action="store_true",
+                        help="顺带清理 uploads/ 里不再被引用的孤儿文件（默认不删）")
     args = parser.parse_args()
 
     files = sorted(
@@ -277,6 +316,9 @@ def main() -> int:
             from app.indexing import rebuild_index
             info = rebuild_index()
             print(f"[idx] 索引重建：{info}")
+
+        if args.prune_uploads:
+            prune_uploads(settings.upload_dir, args.dry_run)
 
         print("\n汇总：" + " · ".join(f"{k}={v}" for k, v in stats.items()))
         if args.dry_run:
