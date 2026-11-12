@@ -115,6 +115,19 @@ def main() -> int:
             failures.append(f"{label}：路由没到位（{c.eval('location.pathname')}）")
             continue
 
+        # 列表页要真出数据。上一轮 7 页巡检全过、224 项测试全绿，
+        # 但知识库页其实是「文件（0）」——因为断言只量了字数与溢出，
+        # 没量表格行数。空表同样是"有内容的页面"，只有数行才测得出来。
+        if path == "/library":
+            rows = c.eval("document.querySelectorAll('.table tbody tr').length")
+            heading = c.eval("(document.querySelector('.list-head h3')||{}).textContent || ''")
+            if not rows:
+                failures.append(f"{label}：文件列表 0 行（标题「{heading}」）")
+            elif rows < 5:
+                failures.append(f"{label}：文件列表只有 {rows} 行，像是没加载完")
+            else:
+                notes.append(f"知识库列表 {rows} 行 / 标题「{heading.strip()}」")
+
         body = text_of(c)
         if len(body) < 200:
             failures.append(f"{label}：页面内容过少（{len(body)} 字）")

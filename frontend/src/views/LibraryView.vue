@@ -219,7 +219,17 @@ async function openFromQuery() {
   document.getElementById(`doc-${target}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
-onMounted(openFromQuery)
+// 挂载时必须先拉一次列表：`openFromQuery` 在没有 `?doc=` 时直接 return，
+// 只挂它的话 `loadDocs` 永远不执行，页面会一直显示「文件（0）」——
+// 而接口其实返回了 18 条。深链分支自己会调 `loadDocs`，别重复请求。
+onMounted(async () => {
+  const target = String(route.query.doc ?? '')
+  if (target) {
+    await openFromQuery()
+    return
+  }
+  await loadDocs()
+})
 watch([page, statusFilter], loadDocs)
 watch(() => route.query.doc, openFromQuery)
 
