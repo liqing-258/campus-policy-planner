@@ -24,7 +24,7 @@
 | 问答链路（检索 → 生成 → 引用校验 → 拒答） | ✅ 可用（M4）：4 条接口 + 24 条评测集全过 |
 | 规则抽取 / 三态匹配 / 计划 / 任务 | ✅ 可用（M5）：13 条接口，T-13–T-22 全过 |
 | 节点轨迹 / 注入防护 / 版本冲突 / 反馈 / 统计 | ✅ 可用（M6）：4 条接口，T-11/T-12 转绿，共 230 项测试 |
-| 端到端验收与部署加固 | ✅ 已完成（M7）：静态托管 + 免安装 exe（102.9 MB）+ 双场景自检 + 复现实测 |
+| 端到端验收与部署加固 | ✅ 已完成（M7）：静态托管 + 免安装 exe（102.9 MB）+ 三场景自检 + 复现实测 |
 | 第一轮缺陷修复（R1） | ✅ 已完成：表单控件选型 / 聊天页三行网格 / 追问语义 / 历史抽屉 / 知识库 5→18 份；**15 处缺陷闭环，含 1 处崩溃级**（见 `docs/90-AI协作留痕/10-第一轮缺陷修复.md`） |
 | 模型接入 | ✅ 已接入 `deepseek-flash`（`/health` 返回 `llm_mode=llm`） |
 
@@ -492,7 +492,7 @@ curl -X POST http://127.0.0.1:5000/api/v1/qa/ask ^
 .venv\Scripts\python.exe tools\dump_routes.py --expect 31   # 真实接口数（M7 仍为 31 条）
 .venv\Scripts\python.exe tools\run_eval.py        # 24 条评测集，门禁 2 项（约 50 秒，会真实调模型）
 .venv\Scripts\python.exe tools\e2e_gate.py        # M3 端到端 10 项（M3 交付，仍应全过）
-.venv\Scripts\python.exe tools\verify_exe.py      # M7：exe 双场景自检（裸 exe + 带库交付）
+.venv\Scripts\python.exe tools\verify_exe.py      # M7：exe 三场景自检（裸 exe / 带库交付 / 当服务跑）
 .venv\Scripts\python.exe tools\browser_check.py   # M7：7 页真实渲染巡检（需先起服务）
 .venv\Scripts\python.exe tools\repro_check.py     # M7：干净树 10 分钟复现门禁（约 6 分钟）
 .venv\Scripts\python.exe tools\md_to_pdf.py "docs\70-提交版\技术文档（提交版·30页）.md"
@@ -705,7 +705,7 @@ cd frontend && npm run typecheck && npm run build
 | 4 | 评测集 | 24 条问答，拒答正确率 ≥ 90%，引用越界 = 0 | ✅ M4 建立并全过（拒答 100% / 越界 0）；M6 未扩充，数字不对外引用（B-2） |
 | 5 | 契约 | 接口数一致，无未登记接口 | ✅ `dump_routes.py --expect 31` |
 | 6 | 复现 | 干净环境 ≤ 10 分钟完成核心演示 | ✅ **348.2 秒**（`tools/repro_check.py` 实测，见 §10.1） |
-| 7 | 打包 | exe 在陌生目录能自举、带库能直接演示、不污染交付目录 | ✅ `tools/verify_exe.py` 双场景全过（见 §10.2） |
+| 7 | 打包 | exe 在陌生目录能自举、带库能直接演示、不污染交付目录、**包里含当前功能** | ✅ `tools/verify_exe.py` 三场景全过（见 §10.2） |
 | 8 | 界面 | 7 页真实渲染无建设期痕迹、无横向溢出、深色主题亮度达标 | ✅ `tools/browser_check.py` 全过（见 §10.3） |
 
 ### 10.1 复现门禁实测（M7 门禁第 1 条）
@@ -735,7 +735,7 @@ cd frontend && npm run typecheck && npm run build
    这不是失败——它正是 README 承诺的默认行为，说明系统在**没有任何密钥**的前提下也能完整复现。
    要验生成式回答，得自己填 `LLM_API_KEY`，那不在 10 分钟门禁的范围内。
 
-### 10.2 exe 双场景自检（M7 门禁第 2 条）
+### 10.2 exe 三场景自检（M7 门禁第 2 条；R2 补做加了场景 C）
 
 `tools/verify_exe.py` 把 `dist/` 整份拷到**系统临时目录**再跑（绝不在交付目录里跑，否则数据会落进
 `dist/data/`，把演示痕迹一起发给老师），跑完逐项比对 `dist/` 前后字节一致。
@@ -743,7 +743,8 @@ cd frontend && npm run typecheck && npm run build
 | 场景 | 输入 | 断言 | 实测 |
 | --- | --- | --- | --- |
 | A 裸 exe | 只拷 exe，无 `data/` | 自举建库、演示账号、导入政策、6 项 HTTP 全 200 | `建表 13 张 · 新增账号 2 个 · 导入政策 18 份` ✅ |
-| B 带库交付 | exe + `data/`（含交付库与 5 个上传件） | 交付数据原样可用、不重复导入 | `documents=5 chunks=14 tasks=6` ✅ |
+| B 带库交付 | exe + `data/`（含交付库与 20 个上传件） | 交付数据原样可用、不重复导入 | `documents=20 chunks=122 tasks=11` ✅ |
+| C 当服务跑 | exe + 交付库，`--port` 起在空闲端口 | 调 `/retrieval/search`：不被拒答、且候选里有 `via_neighbour=true` 的补全片段 | `refused=False 候选 10 条 · 补全 2 条` ✅ |
 | 污染检查 | 跑完比对 `dist/` | 交付目录未被写入 | `前后逐项一致` ✅ |
 
 ### 10.3 界面巡检（M7 门禁第 3 条）
@@ -1067,7 +1068,7 @@ AI 生成的任务可能遗漏或过度解读。让用户先看、先改、再�
 | `docs/30-接口契约/接口契约统一规范.md` | 外壳、错误码、分页、幂等、鉴权 |
 | `docs/30-接口契约/接口清单.md` | 31 条接口 × 角色 × 里程碑 × 错误码（V1.6，含 M3–M6 偏差登记与 M7 根路径语义） |
 | `docs/60-交付/运行说明.md` | 安装、启动、M2–M7 验证清单、故障排查（V1.7） |
-| `docs/60-交付/打包与分发.md` | **M7 新增**：为什么打包、dist 结构、三条硬约束、PyInstaller 参数、双场景自检实测、三个真跑才暴露的坑 |
+| `docs/60-交付/打包与分发.md` | **M7 新增**：为什么打包、dist 结构、三条硬约束、PyInstaller 参数、三场景自检实测、三个真跑才暴露的坑 |
 | `docs/60-交付/演示视频脚本.md` | **M7 新增**：8 分镜逐段台词与画面（含 2 分钟 AI 协作）、备用问题清单、录制后自检 |
 | `docs/60-交付/已知限制.md` | **25 条**限制（A 4 / B 10 / C 11）+ §7 M7 处置计划 |
 | `docs/90-AI协作留痕/00-AI对话历史总档.md` | **Prompt 留痕索引**：导出方案、证据台账、三要素检查、功能链补齐门禁（V1.6） |
