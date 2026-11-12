@@ -36,8 +36,8 @@ sys.path.insert(0, ROOT)
 
 SET_PATH = os.path.join(ROOT, "eval", "qa_set.jsonl")
 DEMO_FILES = [
-    "01-本科生奖学金评审办法（演示样例）.pdf",
-    "02-学生事务办理指南（演示样例）.docx",
+    "01-本科生奖学金评审办法（2026年版）.pdf",
+    "02-学生事务办理指南.docx",
 ]
 REFUSE_CODES = {4001, 4003, 4006}
 CATEGORY_ORDER = ["A", "B", "C", "D", "E", "F"]
@@ -86,7 +86,16 @@ def prepare_app(min_coverage: float | None):
     headers = {"Authorization": f"Bearer {token}"}
 
     for name in DEMO_FILES:
-        with open(os.path.join(ROOT, "demo", name), "rb") as handle:
+        path = os.path.join(ROOT, "demo", name)
+        if not os.path.exists(path):
+            # 文件名改过一次（去掉「（演示样例）」），这里写死过一次旧名，
+            # 结果评测直接 FileNotFoundError，而不是"某条答错"。
+            # 报错时把 demo/ 里真实存在的文件列出来，下次一眼看出该改成什么。
+            available = sorted(
+                p.name for p in (ROOT / "demo").iterdir() if p.is_file()
+            )
+            raise SystemExit(f"评测要用的示例文件不存在：{name}\ndemo/ 现有：{available}")
+        with open(path, "rb") as handle:
             resp = client.post("/api/v1/documents", headers=headers,
                                data={"file": (io.BytesIO(handle.read()), name)},
                                content_type="multipart/form-data")
