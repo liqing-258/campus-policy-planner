@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import shutil
 import subprocess
 import sys
@@ -48,6 +49,25 @@ def pkg_modules(pkg: str) -> list[str]:
     return mods
 
 
+def check_frontend_fresh(frontend: Path, src_root: Path | None = None) -> None:
+    """dist 比源码旧就大声说出来。
+
+    为什么要这条：前端产物是构建时塞进 exe 的，**源码改了但没重新 build** 时，
+    exe 里跑的还是旧页面，而接口测试一条都不会失败。R2 那次列表页「文件（0）」
+    正是这一层——修完源码忘了重新 build，页面就还是坏的，而包看上去没问题。
+    """
+    built = frontend / "index.html"
+    src_root = src_root or (ROOT / "frontend" / "src")
+    newest = max((p.stat().st_mtime for p in src_root.rglob("*") if p.is_file()), default=0)
+    if newest > built.stat().st_mtime:
+        delta = int(newest - built.stat().st_mtime)
+        print(f"[构建] ⚠ 前端产物可能过期：src/ 最新改动比 dist/index.html 晚 {delta} 秒")
+        print("       先跑 cd frontend && npm run build，否则 exe 里是旧页面")
+        if os.environ.get("ZHIXIAO_ALLOW_STALE_DIST") != "1":
+            print("       已中止。确认要用旧产物再打，请设 ZHIXIAO_ALLOW_STALE_DIST=1")
+            sys.exit(2)
+
+
 def build() -> Path:
     stamp = time.strftime("%H%M%S")
     work = BUILD / f"{NAME}_{stamp}"
@@ -57,6 +77,7 @@ def build() -> Path:
     frontend = ROOT / "frontend" / "dist"
     if not (frontend / "index.html").is_file():
         sys.exit("前端未构建：先运行 cd frontend && npm run build")
+    check_frontend_fresh(frontend)
 
     hidden: list[str] = []
     hidden += pkg_modules("app")
