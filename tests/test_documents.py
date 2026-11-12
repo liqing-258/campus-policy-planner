@@ -12,11 +12,13 @@ from pathlib import Path
 import pytest
 
 DEMO = Path(__file__).resolve().parent.parent / "demo"
-PDF_OK = DEMO / "01-本科生奖学金评审办法（演示样例）.pdf"
-DOCX_OK = DEMO / "02-学生事务办理指南（演示样例）.docx"
-PDF_SCANNED = DEMO / "03-扫描件样例（演示样例）.pdf"
-TXT_EMPTY = DEMO / "04-空文本样例（演示样例）.txt"
-PDF_FAKE = DEMO / "05-改名的假文件（演示样例）.pdf"
+# 知识库演示文档（会被自举导入，用户看得见）
+PDF_OK = DEMO / "01-本科生奖学金评审办法（2026年版）.pdf"
+DOCX_OK = DEMO / "02-学生事务办理指南.docx"
+# 异常样本只给自动化测试用，放在 fixtures/ 下，不进知识库
+PDF_SCANNED = DEMO / "fixtures" / "扫描件样例.pdf"
+TXT_EMPTY = DEMO / "fixtures" / "空文本样例.txt"
+PDF_FAKE = DEMO / "fixtures" / "改名的假文件.pdf"
 
 
 def upload(client, headers, path: Path, **form):

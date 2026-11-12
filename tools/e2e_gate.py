@@ -24,14 +24,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DEMO = ROOT / "demo"
 
-# 每个演示文件期望的结果：(文件名, 期望 HTTP, 期望业务码, 期望文档状态, 期望提示关键词)
+# 每个演示文件期望的结果：(相对 demo/ 的路径, 期望 HTTP, 期望业务码, 期望文档状态, 期望提示关键词)
 EXPECT = [
-    ("01-本科生奖学金评审办法（演示样例）.pdf", 201, 0, "indexed", None),
-    ("02-学生事务办理指南（演示样例）.docx", 201, 0, "indexed", None),
-    ("03-扫描件样例（演示样例）.pdf", 201, 0, "empty", "扫描件"),
-    ("04-空文本样例（演示样例）.txt", 201, 0, "empty", "有效阈值"),
+    ("01-本科生奖学金评审办法（2026年版）.pdf", 201, 0, "indexed", None),
+    ("02-学生事务办理指南.docx", 201, 0, "indexed", None),
+    ("fixtures/扫描件样例.pdf", 201, 0, "empty", "扫描件"),
+    ("fixtures/空文本样例.txt", 201, 0, "empty", "有效阈值"),
     # 扩展名说是 PDF，内容却是 MZ 头（Windows 可执行文件）→ 415 / 1005，在写盘之前就拦住
-    ("05-改名的假文件（演示样例）.pdf", 415, 1005, None, None),
+    ("fixtures/改名的假文件.pdf", 415, 1005, None, None),
 ]
 
 

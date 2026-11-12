@@ -10,7 +10,7 @@
 
 **这一步在做什么**
 
-1. 把已有的《本科生奖学金评审办法（演示样例）》标注为 2026-2027 学年、
+1. 把已有的《本科生奖学金评审办法（2026年版）》标注为 2026-2027 学年、
    2026-09-01 发布、现行有效——它此前三项全空，等于"来源不明"；
 2. 上传《01-本科生奖学金评审办法（2025年版）.pdf》，标注 2025-2026 学年、
    2025-09-01 发布、已被替代。
@@ -38,7 +38,7 @@ from app import create_app  # noqa: E402
 from app.versions import normalize_title  # noqa: E402
 
 DEMO = ROOT / "demo"
-CURRENT_PDF = DEMO / "01-本科生奖学金评审办法（演示样例）.pdf"
+CURRENT_PDF = DEMO / "01-本科生奖学金评审办法（2026年版）.pdf"
 OLD_PDF = DEMO / "01-本科生奖学金评审办法（2025年版）.pdf"
 
 CURRENT_META = {

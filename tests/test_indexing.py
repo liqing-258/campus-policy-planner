@@ -7,7 +7,13 @@ M3 的门禁写的是"上传、解析、切分、索引"，前三个都有接口
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.indexing import Bm25Index, tokenize
+
+# 演示 PDF 的绝对路径只写一处：文件名随知识库改过一轮（去掉了"（演示样例）"），
+# 之前散落在两个用例里，改一次名字就漏一处，两个端到端用例一起 FileNotFoundError。
+DEMO_PDF = Path(__file__).resolve().parent.parent / "demo" / "01-本科生奖学金评审办法（2026年版）.pdf"
 
 
 def test_tokenize_drops_stopwords_and_single_cjk_chars():
@@ -182,11 +188,9 @@ def test_invalidate_clears_index():
 # ---------------------------------------------------------------- 端到端
 def test_uploaded_document_is_searchable(client, admin_headers, app):
     """走完整链路：上传 PDF → 解析 → 切分 → 建索引 → 能检索到。"""
-    from pathlib import Path
-
     from app.indexing import get_index
 
-    pdf = Path(__file__).resolve().parent.parent / "demo" / "01-本科生奖学金评审办法（演示样例）.pdf"
+    pdf = DEMO_PDF
     with open(pdf, "rb") as handle:
         resp = client.post("/api/v1/documents", headers=admin_headers,
                            data={"file": (handle, pdf.name), "title": "（演示样例）索引端到端"},
@@ -208,11 +212,9 @@ def test_index_is_lazily_loaded_after_process_restart(client, admin_headers, app
     `/qa/ask` 却答"知识库为空：尚未上传任何已解析的政策文件"——
     因为索引不落盘，重启后没人重建它，而报错信息把人指向"去重新上传文件"这个错误方向。
     """
-    from pathlib import Path
-
     from app.indexing import EXTENSION_KEY, Bm25Index, ensure_index_loaded, get_index
 
-    pdf = Path(__file__).resolve().parent.parent / "demo" / "01-本科生奖学金评审办法（演示样例）.pdf"
+    pdf = DEMO_PDF
     with open(pdf, "rb") as handle:
         client.post("/api/v1/documents", headers=admin_headers,
                     data={"file": (handle, pdf.name), "title": "（演示样例）懒加载"},
