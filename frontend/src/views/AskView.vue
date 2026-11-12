@@ -203,10 +203,34 @@ const injections = computed(() => answer.value?.injection_suspected
 const empty = computed(() => !answer.value && !refusal.value && !degraded.value
   && !citationRejected.value && !fatal.value)
 
+/** 先把 HTML 转义再加粗——模型输出不可信，不能直接塞进 v-html */
+function escapeHtml(raw: string): string {
+  return raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+/** 只处理 **粗体**：模型爱用它标条件名，原样显示会看到一堆星号 */
+const answerHtml = computed(() =>
+  escapeHtml(answer.value?.answer ?? '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>'),
+)
+
 const confidenceLabel: Record<string, string> = {
   high: '高',
   medium: '中',
   low: '低',
+}
+
+const examples = [
+  '申请国家励志奖学金需要满足哪些条件？',
+  '国家励志奖学金的申请截止时间是哪天？',
+  '家庭经济困难认定需要提交哪些材料？',
+]
+
+function askExample(text: string) {
+  question.value = text
+  ask()
 }
 
 function goAction(action: string) {
@@ -247,7 +271,7 @@ onMounted(loadConversations)
     <!-- ============ 节点轨迹（M6）============ -->
     <section v-if="workflow" class="card trace-card">
       <div class="result-head">
-        <h3>处理过程</h3>
+        <h3>本次处理过程</h3>
         <span class="muted tiny">
           {{ workflow.executed_count }} / {{ workflow.node_count }} 个节点执行 ·
           共 {{ workflow.total_ms }} ms · 模型调用 {{ workflow.model_calls }} 次
@@ -270,9 +294,8 @@ onMounted(loadConversations)
         </li>
       </ol>
       <p class="muted tiny">
-        一次问答只走「意图 → 检索 → 分析 → 校验」四个节点；三态匹配与计划生成属于另外两条链路，
-        这里如实标为未执行，而不是补成"已完成"。
-      </p>
+        系统按「理解问题 → 检索原文 → 组织答案 → 校验引用」四步处理这次提问；
+        灰显的步骤本次没有涉及（资格匹配与计划生成属于另外两条链路）。</p>
       <details class="trace-detail">
         <summary class="muted tiny">展开每个节点的摘要</summary>
         <ul class="trace-summaries">
@@ -357,14 +380,12 @@ onMounted(loadConversations)
         <h3>答案</h3>
         <span class="tag met">把握度：{{ confidenceLabel[answer.confidence] ?? answer.confidence }}</span>
       </div>
-      <p class="answer-text">{{ answer.answer }}</p>
+      <p class="answer-text" v-html="answerHtml" />
       <p class="muted tiny">
         事项：{{ answer.matter.label }} ·
-        模型 {{ answer.model }} · 检索 {{ answer.retrieval_mode }} ·
-        生成 {{ answer.latency_ms }} ms · 端到端 {{ answer.total_ms }} ms ·
-        检索候选 {{ answer.retrieval.candidates.length }} 条（共命中 {{ answer.retrieval.total_hits }}）
-        <template v-if="answer.history_pairs"> · 带入 {{ answer.history_pairs }} 轮上下文</template>
-      </p>
+        用时 {{ (answer.total_ms / 1000).toFixed(1) }} 秒 ·
+        引用 {{ answer.citations.length }} 条
+        <template v-if="answer.history_pairs"> · 含 {{ answer.history_pairs }} 轮上文</template></p>
       <p v-if="answer.disclaimer" class="muted tiny">{{ answer.disclaimer }}</p>
 
       <!-- 反馈 -->
@@ -379,11 +400,11 @@ onMounted(loadConversations)
           </span>
         </template>
         <template v-else>
-          <button class="btn ghost tiny-btn" :disabled="feedbackBusy" @click="submitFeedback(answer.message_id, true)">
+          <button class="btn btn-ghost tiny-btn" :disabled="feedbackBusy" @click="submitFeedback(answer.message_id, true)">
             有用
           </button>
           <button
-            class="btn ghost tiny-btn"
+            class="btn btn-ghost tiny-btn"
             :disabled="feedbackBusy"
             @click="ratingFor = ratingFor === answer.message_id ? '' : answer.message_id"
           >
@@ -430,7 +451,7 @@ onMounted(loadConversations)
         <h3 class="sub">下一步</h3>
         <ul class="action-list">
           <li v-for="action in answer.next_actions" :key="action.action">
-            <button class="btn ghost tiny-btn" @click="goAction(action.action)">{{ action.label }}</button>
+            <button class="btn btn-ghost tiny-btn" @click="goAction(action.action)">{{ action.label }}</button>
             <span class="muted tiny">{{ action.reason }}</span>
           </li>
         </ul>
@@ -508,14 +529,21 @@ onMounted(loadConversations)
       <h3>请求失败</h3>
       <p class="muted">{{ fatal }}</p>
       <p class="muted tiny">
-        如果是 4002 且消息里带 reasoning_tokens，那是模型的推理预算被耗尽（配置问题），
-        不是"没有依据"。
+        如果是 4002，说明模型这次没能在预算内给出答案（不是"没有依据"），可以重试或换个问法。
       </p>
     </section>
 
-    <p v-if="empty && !asking" class="muted small center">
-      提一个问题试试。答案会标注来源片段，点开可以核对原文。
-    </p>
+    <section v-if="empty && !asking" class="card examples">
+      <h3>可以这样问</h3>
+      <ul>
+        <li v-for="item in examples" :key="item">
+          <button class="example" @click="askExample(item)">{{ item }}</button>
+        </li>
+      </ul>
+      <p class="muted tiny">
+        答案会标注编号引用，点开可以核对原文；证据不足时系统会明确拒答，而不是编一个答案。
+      </p>
+    </section>
 
     <!-- 历史 -->
     <section v-if="conversations.length" class="card">
@@ -614,6 +642,35 @@ onMounted(loadConversations)
 }
 
 /* ---------- 轨迹 ---------- */
+.examples ul {
+  list-style: none;
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.example {
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--c-surface-2);
+  color: var(--c-text);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.example:hover {
+  border-color: var(--c-primary);
+  background: var(--c-primary-weak);
+  color: var(--c-primary);
+}
+
 .trace-card {
   background: var(--c-surface);
 }
@@ -717,7 +774,7 @@ onMounted(loadConversations)
 }
 
 .conflict-table tr.newest td {
-  background: #f1f8f4;
+  background: var(--c-met-bg);
 }
 
 /* ---------- 反馈 ---------- */
@@ -831,13 +888,13 @@ onMounted(loadConversations)
 }
 
 .warn-card {
-  border-color: #f0dfae;
-  background: #fffdf7;
+  border-color: var(--c-warn-border);
+  background: var(--c-warn-bg);
 }
 
 .err-card {
-  border-color: #f2d3d0;
-  background: #fdf7f6;
+  border-color: var(--c-not-met-border);
+  background: var(--c-not-met-bg);
 }
 
 .draft {
@@ -860,20 +917,20 @@ onMounted(loadConversations)
 
 .tag.met {
   color: var(--c-met);
-  border-color: #cfe6da;
-  background: #f1f8f4;
+  border-color: var(--c-met-border);
+  background: var(--c-met-bg);
 }
 
 .tag.unknown {
   color: var(--c-unknown);
-  border-color: #f0dfae;
-  background: #fff8e6;
+  border-color: var(--c-warn-border);
+  background: var(--c-warn-bg);
 }
 
 .tag.not_met {
   color: var(--c-not-met);
-  border-color: #f2d3d0;
-  background: #fdf2f1;
+  border-color: var(--c-not-met-border);
+  background: var(--c-not-met-bg);
 }
 
 .tag.plain {

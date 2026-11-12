@@ -11,16 +11,14 @@ import RulesView from './views/RulesView.vue'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
-    { path: '/', name: 'dashboard', component: DashboardView },
-    // M3：知识库
-    { path: '/library', name: 'library', component: LibraryView },
-    // M4：问答
-    { path: '/ask', name: 'ask', component: AskView },
-    // M5：匹配 / 计划 / 规则
-    { path: '/match', name: 'match', component: MatchView },
-    { path: '/plans', name: 'plans', component: PlansView },
-    { path: '/rules', name: 'rules', component: RulesView, meta: { adminOnly: true } },
+    // meta.title 由 App.vue 顶栏读取，页面里不再各写一份标题
+    { path: '/login', name: 'login', component: LoginView, meta: { public: true, title: '登录' } },
+    { path: '/', name: 'dashboard', component: DashboardView, meta: { title: '工作台' } },
+    { path: '/library', name: 'library', component: LibraryView, meta: { title: '政策知识库' } },
+    { path: '/ask', name: 'ask', component: AskView, meta: { title: '智能问答' } },
+    { path: '/match', name: 'match', component: MatchView, meta: { title: '资格匹配' } },
+    { path: '/plans', name: 'plans', component: PlansView, meta: { title: '计划与任务' } },
+    { path: '/rules', name: 'rules', component: RulesView, meta: { adminOnly: true, title: '规则管理' } },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })

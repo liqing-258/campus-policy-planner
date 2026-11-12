@@ -67,16 +67,60 @@ const profile = ref({
   enrollment_status: '',
 })
 
-const fields: { key: keyof typeof profile.value; label: string; hint: string; type: string }[] = [
-  { key: 'student_type', label: '学生类型', hint: '如 full_time_undergraduate', type: 'text' },
+type Field = {
+  key: keyof typeof profile.value
+  label: string
+  hint: string
+  type: string
+  /** 枚举字段用下拉，避免用户照着英文枚举值猜怎么写 */
+  options?: { value: string; label: string }[]
+}
+
+/**
+ * 画像字段。
+ *
+ * 早先这里把后端枚举值直接写在 placeholder 里（`full_time_undergraduate` / `yes / no`），
+ * 用户得猜"我该填什么才算数"。改成下拉 + 中文提示：选的是中文，提交的是后端认的值。
+ * 留空仍然是"缺少信息"，不是"不符合"。
+ */
+const fields: Field[] = [
+  { key: 'student_type', label: '学生类型', hint: '如：全日制在校本科生', type: 'text' },
   { key: 'grade', label: '年级', hint: '1–8', type: 'number' },
-  { key: 'gpa', label: '平均学分绩点', hint: '0–5', type: 'number' },
+  { key: 'gpa', label: '平均学分绩点', hint: '0–5，如 3.2', type: 'number' },
   { key: 'rank_percent', label: '专业排名百分比', hint: '0–100，越小越靠前', type: 'number' },
-  { key: 'poverty_certified', label: '家庭经济困难认定', hint: 'yes / no', type: 'text' },
-  { key: 'disciplinary_record', label: '纪律处分记录', hint: 'none 表示无', type: 'text' },
-  { key: 'major', label: '专业', hint: '选填', type: 'text' },
-  { key: 'credits_earned', label: '已修学分', hint: '选填', type: 'number' },
-  { key: 'enrollment_status', label: '学籍状态', hint: '如 enrolled', type: 'text' },
+  {
+    key: 'poverty_certified',
+    label: '家庭经济困难认定',
+    hint: '',
+    type: 'select',
+    options: [
+      { value: 'yes', label: '已认定' },
+      { value: 'no', label: '未认定' },
+    ],
+  },
+  {
+    key: 'disciplinary_record',
+    label: '纪律处分记录',
+    hint: '',
+    type: 'select',
+    options: [
+      { value: 'none', label: '无' },
+      { value: 'any', label: '有' },
+    ],
+  },
+  { key: 'major', label: '专业', hint: '如：物联网工程', type: 'text' },
+  { key: 'credits_earned', label: '已修学分', hint: '如 120', type: 'number' },
+  {
+    key: 'enrollment_status',
+    label: '学籍状态',
+    hint: '',
+    type: 'select',
+    options: [
+      { value: 'enrolled', label: '在籍在读' },
+      { value: 'suspended', label: '休学' },
+      { value: 'graduated', label: '已毕业' },
+    ],
+  },
 ]
 
 async function loadDocuments() {
@@ -305,7 +349,11 @@ watch(documentId, () => {
       <div class="profile-grid">
         <label v-for="f in fields" :key="f.key" class="field">
           <span>{{ f.label }}</span>
-          <input v-model="profile[f.key]" :type="f.type" :placeholder="f.hint" />
+          <select v-if="f.options" v-model="profile[f.key]" class="select">
+            <option value="">未填写</option>
+            <option v-for="opt in f.options" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+          </select>
+          <input v-else v-model="profile[f.key]" :type="f.type" :placeholder="f.hint" />
         </label>
       </div>
 
@@ -483,7 +531,7 @@ watch(documentId, () => {
   padding: 0 var(--space-3);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-control);
-  background: #fff;
+  background: var(--c-surface-2);
   font-family: inherit;
   font-size: 14px;
   color: var(--c-text);
@@ -522,8 +570,8 @@ watch(documentId, () => {
 }
 
 .warn-card {
-  border-color: #f0dfae;
-  background: #fffdf7;
+  border-color: var(--c-warn-border);
+  background: var(--c-warn-bg);
 }
 
 .summary {
@@ -548,20 +596,20 @@ watch(documentId, () => {
 
 .count.met {
   color: var(--c-met);
-  border-color: #cfe6da;
-  background: #f1f8f4;
+  border-color: var(--c-met-border);
+  background: var(--c-met-bg);
 }
 
 .count.not_met {
   color: var(--c-not-met);
-  border-color: #f2d3d0;
-  background: #fdf2f1;
+  border-color: var(--c-not-met-border);
+  background: var(--c-not-met-bg);
 }
 
 .count.unknown {
   color: var(--c-unknown);
-  border-color: #f0dfae;
-  background: #fff8e6;
+  border-color: var(--c-warn-border);
+  background: var(--c-warn-bg);
 }
 
 .group-title {
@@ -628,7 +676,7 @@ watch(documentId, () => {
 .quote {
   margin: 0;
   padding: var(--space-2) var(--space-3);
-  background: #fbfcfd;
+  background: var(--c-surface-2);
   border-left: 3px solid var(--c-primary-weak);
   font-size: 12px;
   color: var(--c-text-2);
@@ -646,20 +694,20 @@ watch(documentId, () => {
 
 .tag.met {
   color: var(--c-met);
-  border-color: #cfe6da;
-  background: #f1f8f4;
+  border-color: var(--c-met-border);
+  background: var(--c-met-bg);
 }
 
 .tag.not_met {
   color: var(--c-not-met);
-  border-color: #f2d3d0;
-  background: #fdf2f1;
+  border-color: var(--c-not-met-border);
+  background: var(--c-not-met-bg);
 }
 
 .tag.unknown {
   color: var(--c-unknown);
-  border-color: #f0dfae;
-  background: #fff8e6;
+  border-color: var(--c-warn-border);
+  background: var(--c-warn-bg);
 }
 
 .tag.plain {

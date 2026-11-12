@@ -432,7 +432,7 @@ function search() {
   padding: 0 var(--space-3);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-control);
-  background: #fff;
+  background: var(--c-surface-2);
   font-family: inherit;
   font-size: 14px;
   color: var(--c-text);
@@ -472,7 +472,7 @@ function search() {
   padding: 0 var(--space-3);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-control);
-  background: #fff;
+  background: var(--c-surface-2);
   font-family: inherit;
   font-size: 13px;
   color: var(--c-text);
@@ -593,20 +593,20 @@ function search() {
 
 .tag.met {
   color: var(--c-met);
-  border-color: #cfe6da;
-  background: #f1f8f4;
+  border-color: var(--c-met-border);
+  background: var(--c-met-bg);
 }
 
 .tag.unknown {
   color: var(--c-unknown);
-  border-color: #f0dfae;
-  background: #fff8e6;
+  border-color: var(--c-warn-border);
+  background: var(--c-warn-bg);
 }
 
 .tag.not_met {
   color: var(--c-not-met);
-  border-color: #f2d3d0;
-  background: #fdf2f1;
+  border-color: var(--c-not-met-border);
+  background: var(--c-not-met-bg);
 }
 
 .tag.plain {
@@ -615,7 +615,7 @@ function search() {
 }
 
 .detail-row td {
-  background: #fbfcfd;
+  background: var(--c-surface-2);
 }
 
 .chunk-list {

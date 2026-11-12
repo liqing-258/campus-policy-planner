@@ -265,7 +265,7 @@ onMounted(loadPlans)
   padding: 0 var(--space-3);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-control);
-  background: #fff;
+  background: var(--c-surface-2);
   font-family: inherit;
   font-size: 14px;
   color: var(--c-text);
@@ -301,7 +301,7 @@ onMounted(loadPlans)
 
 .plan-list li.active {
   background: var(--c-primary-weak);
-  border-color: #c9dcf5;
+  border-color: var(--c-primary-border);
 }
 
 .plan-title {
@@ -410,8 +410,8 @@ onMounted(loadPlans)
   margin: var(--space-1) 0 0;
   font-size: 11px;
   color: var(--c-unknown);
-  background: #fffdf7;
-  border-left: 2px solid #f0dfae;
+  background: var(--c-warn-bg);
+  border-left: 2px solid var(--c-warn-border);
   padding: 2px var(--space-2);
 }
 
@@ -444,14 +444,14 @@ onMounted(loadPlans)
 
 .tag.met {
   color: var(--c-met);
-  border-color: #cfe6da;
-  background: #f1f8f4;
+  border-color: var(--c-met-border);
+  background: var(--c-met-bg);
 }
 
 .tag.unknown {
   color: var(--c-unknown);
-  border-color: #f0dfae;
-  background: #fff8e6;
+  border-color: var(--c-warn-border);
+  background: var(--c-warn-bg);
 }
 
 .tag.plain {
