@@ -36,7 +36,26 @@ def test_health_counts_are_zero_on_empty_database(client):
     assert data["chunk_count"] == 0
 
 
-def test_root_route_is_human_readable(client):
+def test_root_route_serves_the_built_frontend_or_a_json_hint(client):
+    """根路径：前端已构建就托管页面，未构建就退化为 JSON 说明。
+
+    这条测试不能写死其中一种形态——CI 上可能没跑 `npm run build`，
+    而打包版一定有 dist。两种都算通过，判据是"不能 404、不能 500"。
+    """
     resp = client.get("/")
     assert resp.status_code == 200
-    assert resp.get_json()["api"] == "/api/v1"
+    if resp.is_json:
+        assert resp.get_json()["api"] == "/api/v1"
+    else:
+        assert b'<div id="app">' in resp.data
+
+
+def test_unknown_api_path_is_json_404_not_the_spa(client):
+    """`/api/*` 的 404 必须回 JSON。
+
+    如果把 index.html 回给前端，`fetch(...).json()` 会报"解析失败"，
+    真正的原因（接口路径写错）反而被埋掉。
+    """
+    resp = client.get("/api/v1/no-such-endpoint")
+    assert resp.status_code == 404
+    assert resp.is_json
