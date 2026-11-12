@@ -41,6 +41,10 @@ Thumbs.db
 # ---------- 构建产物 ----------
 dist/
 build/
+# M7：PyInstaller 中间目录（每次构建带时间戳，留档可回退，但不入库）
+.build/
+# 根目录误跑 npm 会生成一个空锁文件（真正的锁文件在 frontend/）
+/package-lock.json
 *.spec
 
 # ---------- 例外：演示数据必须入库 ----------
