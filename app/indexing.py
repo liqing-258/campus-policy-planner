@@ -306,11 +306,20 @@ class Bm25Index:
         为什么要公开这一步：补相邻片段时不能拍一个分数上去，
         否则"这条邻片够不够格"就变成了另一套标准，覆盖率闸门形同虚设。
         """
+        return self.score_chunk_with(tokenize(query), chunk_id)
+
+    def score_chunk_with(self, terms: list[str], chunk_id: str) -> SearchHit | None:
+        """按**给定的词项集合**给单个片段打分。
+
+        R3 的双路召回需要它：两路各自召回之后，同一条片段要在"自包含查询"和
+        "扩展词"两个词项视图下各打一次分，再取覆盖率高者过闸
+        （见 `retrieval._score_combined`）。
+        """
         with self._lock:
             chunk = self._by_id.get(chunk_id)
             if chunk is None:
                 return None
-            unique_terms, idf = self._query_stats(tokenize(query))
+            unique_terms, idf = self._query_stats(terms)
             if not unique_terms:
                 return None
             score, coverage, matched = self._score(chunk, unique_terms, idf)

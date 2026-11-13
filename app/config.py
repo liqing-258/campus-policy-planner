@@ -127,6 +127,23 @@ class Settings:
         # ③ 0.50 时 E 类掉到 3/4，说明 0.35 距离"过严"仍有余量。
         # 24 条不足以精确定标，M6 扩充评测集后必须重新校准。
         self.rag_min_coverage = _float("RAG_MIN_COVERAGE", 0.35)
+
+        # --- 查询改写（R3） ---
+        # 追问（"这个问题""它"）与同义说法（"拿奖学金"vs"评审办法"）在 BM25 上召不回来，
+        # 因此在检索前先用一次模型调用把问题改写成自包含查询 + 3~5 个政策同义表述。
+        # 关掉它就退回 R2 的单路检索——这也是"改写把结果搞坏了"时的一键回滚开关。
+        self.query_rewrite_enabled = _bool("QUERY_REWRITE_ENABLED", True)
+        # 扩展词上限：给多了会把查询稀释成"什么都沾一点"，覆盖率分母也跟着膨胀。
+        self.query_rewrite_max_terms = _int("QUERY_REWRITE_MAX_TERMS", 5)
+        # 改写只是输出一个短 JSON，但**不能用小预算**：deepseek-flash 是推理模型，
+        # reasoning_tokens 会先吃掉 max_tokens（见 llm.py 模块文档第 1 条）。
+        # 实测 100 时正文直接为空；800 也不够——端到端跑「那它多久能到账？」这条
+        # 带 4 条历史的追问时 reasoning_tokens 正好吃满 800，正文为空、改写回退原查询，
+        # 于是追问又变成零命中（这正是本模块要修的那个缺陷）。
+        # 1800 给"推理 + 一百来字 JSON"留出余量；仍不够时可以单独调这个变量，
+        # 不必牵动作答那一路的 LLM_MAX_TOKENS。
+        self.query_rewrite_max_tokens = _int("QUERY_REWRITE_MAX_TOKENS", 1800)
+
         self.chunk_size = _int("CHUNK_SIZE", 600)
         self.chunk_overlap = _int("CHUNK_OVERLAP", 80)
         # 有效文本阈值：低于此字符数判 empty（系统设计说明书 §4.2）
