@@ -13,15 +13,23 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, setUnauthorizedHandler, type Health } from './api/client'
 import { useAuthStore } from './stores/auth'
+import { useQAStore } from './stores/qa'
 
 const auth = useAuthStore()
+const qa = useQAStore()
 const router = useRouter()
 const route = useRoute()
 const health = ref<Health | null>(null)
 const healthError = ref('')
 
 onMounted(async () => {
-  setUnauthorizedHandler(() => router.push({ name: 'login' }))
+  // 3001（令牌失效）由 API 层统一回调过来。这里**必须走完整的登出**而不是只跳登录页：
+  // 问答缓存落在 sessionStorage 里，不随令牌失效，只跳页的话下一个人登录后
+  // 一进问答页就能看到上一个人的提问与解答。隐私问题的修法就是"登出即清缓存"。
+  setUnauthorizedHandler(() => {
+    auth.logout()
+    router.push({ name: 'login' })
+  })
   await auth.restore()
   try {
     health.value = await api.get<Health>('/health')
@@ -30,7 +38,15 @@ onMounted(async () => {
   }
 })
 
+/**
+ * 退出登录必须**同时清掉问答缓存**。
+ *
+ * 会话缓存放在 sessionStorage 里，登录态一换它不会自动失效——下一个在这台机器上
+ * 登录的人（比如机房里换人用）一进问答页就会看到上一个人的提问与解答。
+ * 这是隐私问题，不是体验问题。
+ */
 function logout() {
+  qa.clear()
   auth.logout()
   router.push({ name: 'login' })
 }

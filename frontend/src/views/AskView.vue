@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 智能问答（M4 建、M6 补全、M7 后改为对话式布局）。
+ * 智能问答（M4 建、M6 补全、M7 改为对话式布局、R3 补「切页不丢对话」）。
  *
  * 布局参照常见对话式助手：解答在上方主区、提问框固定在底部、
  * 右侧常驻「我提问过的问题」。改布局时**没有删掉任何一项验收能力**：
@@ -18,11 +18,35 @@
  * - **历史问题点击只填入、不自动提交**：它是"我想再问一遍"，
  *   直接发出去等于替用户做决定，还会覆盖掉他正在看的上一条解答。
  *
+ * **R3：为什么"这一轮"的东西要挪进 store**
+ *
+ * 原来 answer / refusal / degraded 是本组件的三个 ref，`<router-view>` 一切走
+ * 组件就卸载，三个 ref 一起消失——用户点了「政策知识库」再点回来，刚才那段解答
+ * 变成一片欢迎页，而数据其实一直在库里。这是真实缺陷，不是"预期行为"：
+ * 同一份会话在右侧历史栏里明明还列着。
+ *
+ * 改成"消息列表 + 当前会话 id"存进 Pinia（`stores/qa.ts`，落 sessionStorage）之后：
+ * - 卸载时**不清空**（`onBeforeUnmount` 里没有任何 clear）；
+ * - 只有点「新对话」才清空；
+ * - 挂载时先 restore → 空且有 conversation_id 就查接口 → 还空才显示欢迎区。
+ *
+ * 本地缓存只存 role / content / 时间 / 精简引用（见 store 里的说明），所以
+ * 切走再切回来时：**一轮完整对话（问答成对）能原样显示**，包括点开得动的引用；
+ * 但"这次处理过程"折叠面板与版本冲突表只活在当前页，回来就收起了——
+ * 它们体积大且刷新即过期，硬塞进 5MB 的 sessionStorage 得不偿失。
+ *
+ * 三个 store 之外仍然留在组件里的状态，以及为什么：
+ * - `answer / refusal / degraded / citationRejected / fatal`：渲染当前这一轮用的**完整**
+ *   对象（节点轨迹、版本冲突、被拒草稿都在里面）。store 里那份是"重放用的精简版"，
+ *   两者刻意不合并——一个要全、一个要小。
+ * - `askedQuestion`：决定"这一轮问的是哪句"，与 store 的追加顺序解耦。
+ * - 反馈状态（`feedbackSent` 等）：挂在 `message_id` 上，跨页没有意义。
+ *
  * 4001/4003/4006 都是 HTTP 200 的业务态，所以用 api.raw 自己按 code 分支，
  * 不能像普通接口那样 try/catch 当错误处理。
  */
-import { computed, nextTick, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   ApiError,
   api,
@@ -44,8 +68,11 @@ import {
   formatTime,
   nodeStatus,
 } from '../utils/format'
+import { fromServerMessage, useQAStore, type QAMessage } from '../stores/qa'
 
 const router = useRouter()
+const route = useRoute()
+const qa = useQAStore()
 
 const question = ref('')
 /** 这一轮实际问出去的问题。单独存是因为输入框随时会被改成下一条 */
@@ -53,20 +80,29 @@ const askedQuestion = ref('')
 const asking = ref(false)
 const elapsed = ref(0)
 
+/**
+ * 这一轮的业务态原文。store 里的 `messages` 是落地版（给缓存与重放用），
+ * 这几个 ref 是"渲染版"——它们带着完整字段（节点轨迹、版本冲突、被拒草稿），
+ * 只活在这一页。两者刻意不合并：一个是持久、精简；一个是临时、完整。
+ */
 const answer = ref<AnswerData | null>(null)
 const refusal = ref<RefusalData | null>(null)
 const degraded = ref<DegradedData | null>(null)
 const citationRejected = ref<CitationRejectedData | null>(null)
 const fatal = ref('')
-const conversationId = ref('')
+/** 会话 id 的真相在 store 里——它要跨页活着 */
+const conversationId = computed(() => qa.currentConversationId)
 /**
- * 当前会话的首轮问题。后端 `/qa/ask` 认 `conversation_id`：带上它就把这一问续进
- * 那个会话（并把最近几轮拼进 prompt），不带就新建一条。
- * 记标题是为了判断"是不是原样再问一遍"——见 ask()。
+ * 挂载时把缓存/接口的旧对话也铺出来——此时上面那几个"渲染版" ref 还是空的。
+ *
+ * 注意它**不再**决定"铺不铺历史"：历史一律由 `qa.messages` 减去本轮两条得出。
+ * 早先用这个布尔量当门，结果"切回来铺好了历史 → 再追问一句"历史立刻消失，
+ * 而这正是用户要看的连续对话。
  */
-const conversationTitle = ref('')
 
 const openCitation = ref('')
+/** 历史轮次里展开的引用（键是 `${轮次下标}-${编号}`，缓存里没有 chunk_id） */
+const openPast = ref('')
 
 const conversations = ref<ConversationRow[]>([])
 /** 右上角「最近提问」控制右侧栏。默认展开：它就是豆包那种右侧历史 */
@@ -129,58 +165,132 @@ async function ask(text?: string) {
   askedQuestion.value = payload
   asking.value = true
   elapsed.value = 0
+  // 清掉"这一轮"的渲染态：上一轮已经在 qa.messages 里，会作为"上文"继续显示，
+  // 不必靠这几个 ref 留着重放——它们只负责当前这一轮。
   answer.value = null
   refusal.value = null
   degraded.value = null
   citationRejected.value = null
   fatal.value = ''
   openCitation.value = ''
+  openPast.value = ''
   ratingFor.value = ''
   ratingReason.value = ''
   feedbackError.value = ''
   const timer = window.setInterval(() => (elapsed.value += 100), 100)
 
   /**
-   * 点历史问题后原样再问一遍 → 带上那个会话的 id，续在原会话里。
+   * 什么时候续在原会话里：**只要当前有会话就续**。
    *
-   * 不带的话后端每问一次就新建一条会话，右侧"我提问过的问题"里立刻多出一行
-   * 和刚才一模一样的记录——用户会以为点按钮点出了 bug。
-   * 只在问题文本没被改过时才续：用户把它改成另一件事，就该是新的一个问题。
+   * R3 起改成这一条——这是多轮对话的前提：用户点「继续追问」时拼出来的句子
+   * 含"这个问题"，只有后端能读到上文，改写才还原得出它指的是哪件事。
+   * 原来的实现只在"原样重问"时才带 id，于是每次追问都新建一条会话，
+   * 一问一答各成孤岛，指代词永远没处还原。
+   *
+   * 早先版本还要求 `qa.messages` 非空，判据是"这条会话里已经有问答在铺着"。
+   * 那个判据是错的：用户在右侧点了一条旧会话再发言时，messages 是空的
+   * （刚切过去还没拉），于是"点名要续那条会话"反而被当成新会话。
+   * 会话 id 本身就是"要不要续"的唯一真相。
    */
-  const reuse = conversationId.value && payload === conversationTitle.value
+  const continuation = Boolean(conversationId.value)
   const body: Record<string, unknown> = { question: payload }
-  if (reuse) body.conversation_id = conversationId.value
+  if (continuation) body.conversation_id = conversationId.value
+  else {
+    /*
+     * 不续的话必须**立刻断开**旧会话 id。
+     *
+     * 这里有一个很容易漏的坑：`fillFromHistory()` 会把用户点过的那条历史会话 id
+     * 摆进 store（好让"发送"续进去）。若用户点了历史、改了个完全不同的问题再发，
+     * 只靠下面 `if (先) 就覆盖 id`，新问题的会话 id 确实会被换掉——
+     * 但那之前它已经以旧会话的身份发出去了，新问题被塞进别人的会话里，
+     * 而且拿到的是旧会话的上文（改写会把上一件事的实体补进这个新问题）。
+     * 所以"不续"这一支要在发请求之前就把 id 清掉。
+     */
+    qa.setConversationId('')
+  }
+
+  // 提问先落进消息列表：用户切走再回来，至少看得到"我问过什么"
+  qa.appendMessage({
+    role: 'user', content: payload, timestamp: new Date().toISOString(), kind: 'answer',
+  })
 
   try {
     const envelope = await api.raw<unknown>('/qa/ask', body)
     if (envelope.code === 0) {
       answer.value = envelope.data as AnswerData
-      conversationId.value = answer.value.conversation_id
+      qa.setConversationId(answer.value.conversation_id)
+      commitTurn('answer', answer.value.answer, answer.value.citations)
+      qa.setWorkflowTrace(answer.value.workflow ?? null)
     } else if (envelope.code === 4001) {
       refusal.value = envelope.data as RefusalData
-      conversationId.value = refusal.value.conversation_id ?? ''
+      // **只在拿到非空 id 时覆盖**：拒答只是"这一轮没有答案"，会话还在。
+      // 早先无条件写 `?? ''`，一被拒答就把会话 id 清空，下一句追问被迫另起会话，
+      // 上一轮问题不在历史里，改写再强也无从还原指代词。
+      if (refusal.value.conversation_id) {
+        qa.setConversationId(refusal.value.conversation_id)
+      }
+      commitTurn('refusal', refusal.value.reason, [])
+      qa.setWorkflowTrace(refusal.value.workflow ?? null)
     } else if (envelope.code === 4006) {
       degraded.value = envelope.data as DegradedData
-      conversationId.value = degraded.value.conversation_id ?? ''
+      if (degraded.value.conversation_id) {
+        qa.setConversationId(degraded.value.conversation_id)
+      }
+      // 降级没有归纳结论，只有原文片段：写成消息正文，切回来才读得到内容。
+      // 只写前两条 + 一句说明：这里存的是"回忆用的摘要"，不是数据源，
+      // 整段拼接会把一条消息撑到几 KB（store 里另有裁剪，但没必要先撑大）。
+      const shown = degraded.value.candidates.slice(0, 2)
+        .map((c) => `[${c.index}] ${c.document_title}：${(c.content ?? '').slice(0, 160)}`)
+        .join('\n\n')
+      commitTurn('degraded',
+        shown
+          + `\n\n（降级模式共 ${degraded.value.candidates.length} 条原文片段，完整内容见下方列表）`,
+        degraded.value.candidates)
+      qa.setWorkflowTrace(degraded.value.workflow ?? null)
     } else if (envelope.code === 4003) {
       citationRejected.value = envelope.data as CitationRejectedData
-      conversationId.value = ''
+      // 这一轮没被采纳，会话 id **不能**覆盖成空——否则后续追问会另起一条会话
+      commitTurn('citation_rejected', '这条解答被拦下：引用编号越界，无法核验。', [])
+      qa.setWorkflowTrace(citationRejected.value.workflow ?? null)
     } else {
       fatal.value = `${envelope.code} · ${envelope.message}`
+      commitTurn('fatal', fatal.value, [])
     }
-    conversationTitle.value = payload
   } catch (err) {
     // 4002/4004/4005 是真故障，必须和"没找到依据"区分开
     fatal.value = err instanceof ApiError
       ? `${err.code} · ${err.message}`
       : (err instanceof Error ? err.message : '请求失败')
+    commitTurn('fatal', fatal.value, [])
   } finally {
     window.clearInterval(timer)
     asking.value = false
+    // 写完这一轮立刻落盘：防抖只该省掉中途的多次写，不该让"最后一条"也悬着
+    qa.writeNow()
     await loadConversations()
     await nextTick()
-    scroller.value?.scrollTo({ top: 0, behavior: 'smooth' })
+    scroller.value?.scrollTo({ top: scroller.value.scrollHeight, behavior: 'smooth' })
   }
+}
+
+/** 把这一轮的助手侧内容落进消息列表（缓存与重放都读它） */
+function commitTurn(kind: QAMessage['kind'], content: string, citations: Candidate[]) {
+  qa.appendMessage({
+    role: 'assistant',
+    content: content || '',
+    timestamp: new Date().toISOString(),
+    kind,
+    citations: citations
+      .filter((c) => c.document_title)
+      .map((c) => ({
+        index: c.index,
+        document_id: c.document_id,
+        document_title: c.document_title,
+        section_title: c.section_title ?? null,
+        page_number: c.page_number ?? null,
+        snippet: String(c.content ?? '').slice(0, 160),
+      })),
+  })
 }
 
 async function loadConversations() {
@@ -195,17 +305,104 @@ async function loadConversations() {
 /**
  * 历史问题只填入输入框，不自动提交。
  * 否则用户点一下历史，正在看的上一条解答就被冲掉了。
+ *
+ * 但它会把会话 id 摆进 store，并且**切走时清空当前消息列表**：
+ * 再点发送时这一问要续进那条会话，而列表里留着的必须是那条会话的内容，
+ * 不能是上一条会话的残留（否则缓存里的两段对话会被拼成一段并不存在的历史）。
  */
 function fillFromHistory(row: ConversationRow) {
   question.value = row.title
-  conversationId.value = row.id
-  conversationTitle.value = row.title
+  qa.switchConversation(row.id)
   focusOpen.value = true
   nextTick(() => {
     inputRef.value?.focus()
     autoGrow()
   })
 }
+
+/**
+ * 挂载时的恢复顺序，三步，任何一步拿到内容就停：
+ *
+ * 1. `restore()` —— 本标签页的 sessionStorage 缓存（切页回来走这条，瞬间可见）
+ * 2. 缓存空但记得 `conversation_id` —— 查接口补历史（清了缓存、换了标签页走这条）
+ * 3. 都空 —— 显示欢迎区（真的没聊过）
+ *
+ * `restore()` 内部已有 try-catch（坏缓存会自清并返回 null）；这里再包一层，
+ * 是因为"缓存读得出来、但接口挂了"同样不能把页面弄白。
+ */
+async function restoreSession() {
+  const cached = qa.restore()
+  // 从知识库带 query 跳进来时，URL 上可能带着会话 id
+  const fromUrl = typeof route.query.conversation_id === 'string'
+    ? route.query.conversation_id : ''
+
+  if (cached?.messages.length) {
+    await nextTick()
+    scrollToEnd()
+    return
+  }
+
+  const targetId = cached?.conversationId || fromUrl
+  if (!targetId) return
+  try {
+    if (await qa.hydrate(targetId)) {
+      await nextTick()
+      scrollToEnd()
+    }
+  } catch {
+    /* 历史拉不回来就当没有——欢迎区总比白屏好 */
+  }
+}
+
+function scrollToEnd() {
+  scroller.value?.scrollTo({ top: scroller.value.scrollHeight })
+}
+
+/**
+ * 新建对话：清缓存、清这一轮的渲染态，回到欢迎区。
+ * **这是唯一允许清空 store 的入口**——卸载时绝不调它。
+ */
+function newConversation() {
+  if (asking.value) return
+  qa.clear()
+  answer.value = null
+  refusal.value = null
+  degraded.value = null
+  citationRejected.value = null
+  fatal.value = ''
+  askedQuestion.value = ''
+  question.value = ''
+  openCitation.value = ''
+  openPast.value = ''
+  // 反馈是挂在 message_id 上的，换了会话就不能再显示上一轮的"已评价"
+  ratingFor.value = ''
+  ratingReason.value = ''
+  feedbackSent.value = {}
+  feedbackError.value = ''
+  nextTick(() => inputRef.value?.focus())
+}
+
+/**
+ * 铺出来的历史轮次。
+ *
+ * 只取"当前这一轮之前"的部分：本轮那一对（提问 + 解答）由下方结构化区块渲染，
+ * 再铺一遍就重复了。判据是本轮是否有渲染态——有就把它对应的两条从末尾切掉。
+ *
+ * **不再用"是否刚从缓存恢复"当开关**（早先有一个 `historyLoaded`）：那个开关让
+ * "切回来看到历史 → 再追问一句"时历史立刻消失，而这恰恰是用户要看的连续对话。
+ * 现在历史只由消息列表本身决定，恢复的和刚问完的走同一条路径。
+ */
+const historyTurns = computed<QAMessage[]>(() => {
+  const list = qa.messages
+  const hasCurrentTurn = Boolean(answer.value || refusal.value || degraded.value
+    || citationRejected.value || fatal.value || askedQuestion.value)
+  if (!hasCurrentTurn) return list
+  // 本轮最多占末尾两条（提问 + 解答）；按角色从后往前剥，不按位置硬切
+  let end = list.length
+  if (end > 0 && list[end - 1].role === 'assistant') end -= 1
+  if (end > 0 && list[end - 1].role === 'user') end -= 1
+  return list.slice(0, end)
+})
 
 // ---------- 结果汇总 ----------
 /** 四条分支都可能带轨迹（包括拒答与降级），统一取一次 */
@@ -229,8 +426,14 @@ const injections = computed(() => answer.value?.injection_suspected
 const hasResult = computed(() => Boolean(answer.value || refusal.value || degraded.value
   || citationRejected.value || fatal.value))
 
-/** 一次解答都没有、也没在问——显示欢迎区，而不是一片空白 */
-const firstVisit = computed(() => !hasResult.value && !asking.value && !askedQuestion.value)
+/**
+ * 一次解答都没有、也没在问、也没有铺出来的历史——才显示欢迎区。
+ *
+ * 加了 `historyTurns.length` 这一项是关键：切页回来时上面那几个"渲染版" ref 必然是空的，
+ * 只看它们会把一条有内容的会话判成"首次访问"，于是刚恢复的记录又被欢迎页盖住。
+ */
+const firstVisit = computed(() => !hasResult.value && !asking.value && !askedQuestion.value
+  && historyTurns.value.length === 0)
 
 /** 先把 HTML 转义再加粗——模型输出不可信，不能直接塞进 v-html */
 function escapeHtml(raw: string): string {
@@ -240,10 +443,16 @@ function escapeHtml(raw: string): string {
     .replace(/>/g, '&gt;')
 }
 
-/** 只处理 **粗体**：模型爱用它标条件名，原样显示会看到一堆星号 */
-const answerHtml = computed(() =>
-  escapeHtml(answer.value?.answer ?? '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>'),
-)
+/**
+ * 只处理 **粗体**：模型爱用它标条件名，原样显示会看到一堆星号。
+ * 先转义再加粗，顺序不能反——反过来会把 <strong> 自己的尖括号也转义掉。
+ * 历史轮次也走这个函数（见 renderText），免得"刚答完"与"切回来"排版不一样。
+ */
+function renderText(raw: string): string {
+  return escapeHtml(raw).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+}
+
+const answerHtml = computed(() => renderText(answer.value?.answer ?? ''))
 
 const confidenceLabel: Record<string, string> = {
   high: '高',
@@ -348,7 +557,21 @@ function goAction(action: string) {
   router.push(action === 'match' ? '/match' : '/plans')
 }
 
-onMounted(loadConversations)
+onMounted(async () => {
+  await loadConversations()
+  await restoreSession()
+})
+
+/**
+ * **卸载时不允许清空会话。**
+ *
+ * 这里只留一句注释和一次"把待写的防抖冲掉"：切页时如果再等 300ms 就没机会写了，
+ * 所以强制落盘一次。除此之外什么都不做——`qa.clear()` 只属于「新建对话」按钮
+ * 和登出流程，它出现在这里正是"切页丢对话"这个缺陷的成因。
+ */
+onBeforeUnmount(() => {
+  qa.writeNow()
+})
 </script>
 
 <template>
@@ -361,6 +584,15 @@ onMounted(loadConversations)
           证据不足时系统会直接说不知道，而不是编一个看起来合理的说法。
         </p>
       </div>
+      <button
+        v-if="qa.messages.length"
+        class="btn btn-ghost btn-sm new-chat"
+        title="清空当前对话，开始一个新的问题"
+        @click="newConversation"
+      >
+        <span class="ico">＋</span>
+        新对话
+      </button>
       <button
         class="btn btn-ghost btn-sm history-toggle"
         :class="{ on: historyOpen }"
@@ -387,6 +619,57 @@ onMounted(loadConversations)
               <li>觉得不对，可以标记「没帮助」并选原因</li>
             </ul>
           </div>
+
+          <!-- 这段对话里之前的轮次（本轮那两条不在其中） -->
+          <template v-if="historyTurns.length">
+            <div v-if="!hasResult && !asking" class="resumed-note muted tiny">
+              以下是这次对话里之前的问答；要继续追问可以直接往下问，想重新开始点「新对话」。
+            </div>
+            <template v-for="(m, i) in historyTurns" :key="`${m.timestamp}-${i}`">
+              <div v-if="m.role === 'user'" class="turn-user past">
+                <p>{{ m.content }}</p>
+              </div>
+              <section v-else class="turn-bot past">
+                <div class="bot-head">
+                  <span class="kicker">
+                    {{ m.kind === 'refusal' ? '未作答：证据不足'
+                      : m.kind === 'degraded' ? '原文片断'
+                      : m.kind === 'citation_rejected' ? '已拦下'
+                      : m.kind === 'fatal' ? '请求失败' : '解答' }}
+                  </span>
+                  <span class="muted tiny">{{ formatTime(m.timestamp) }}</span>
+                </div>
+                <div v-if="m.kind === 'answer'" class="answer-text" v-html="renderText(m.content)" />
+                <p v-else class="muted small pre">{{ m.content }}</p>
+                <ul v-if="m.citations?.length" class="cite-list compact">
+                  <li v-for="c in m.citations" :key="`${i}-${c.index}`">
+                    <button
+                      class="cite-head"
+                      @click="openPast = openPast === `${i}-${c.index}` ? '' : `${i}-${c.index}`"
+                    >
+                      <span class="tag plain">[{{ c.index }}]</span>
+                      <strong>{{ c.document_title }}</strong>
+                      <span class="muted small">{{ evidenceLabel(c.page_number, c.section_title) }}</span>
+                      <span class="cite-toggle">
+                        {{ openPast === `${i}-${c.index}` ? '收起' : '展开' }}
+                      </span>
+                    </button>
+                    <!-- 缓存里只留了 160 字摘要，展开看的是这段摘要而不是全文；
+                         要看全文得回原问题重新检索——这一点在提示里写明，别让人以为被截断了 -->
+                    <p v-if="openPast === `${i}-${c.index}`" class="cite-body">
+                      {{ c.snippet || '（本地缓存未保留这段原文，请重新提问以查看完整片段）' }}
+                    </p>
+                  </li>
+                </ul>
+              </section>
+            </template>
+            <!-- 上一问没等到回答（请求还在飞时就切走了，或者页面被关掉）：
+                 如实说一句，别让用户对着一句孤零零的提问猜"系统是不是没理我" -->
+            <p v-if="historyTurns[historyTurns.length - 1].role === 'user'"
+               class="muted tiny pending-note">
+              这一问没有等到回答（切换页面或关闭时请求被中断），可以重新问一次。
+            </p>
+          </template>
 
           <!-- 这一轮问的问题 -->
           <div v-if="askedQuestion && !firstVisit" class="turn-user">
@@ -924,6 +1207,54 @@ onMounted(loadConversations)
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* ---------- 切页回来铺出的历史轮次 ---------- */
+/* 刻意降一档对比度：它们是"上文"，当前这一轮才是用户要读的。
+   但不做灰到看不清——用户回来就是为了重读它。 */
+.resumed-note {
+  padding: 2px 0 6px;
+  border-bottom: 1px dashed var(--c-border);
+  margin-bottom: 4px;
+}
+
+.turn-user.past {
+  opacity: 0.78;
+}
+
+.turn-bot.past {
+  background: transparent;
+  border-style: dashed;
+}
+
+.turn-bot.past .answer-text {
+  opacity: 0.86;
+}
+
+.pre {
+  white-space: pre-wrap;
+}
+
+.cite-list.compact {
+  margin-top: 6px;
+}
+
+.cite-head.static {
+  cursor: default;
+}
+
+.cite-head.static:hover {
+  background: transparent;
+}
+
+.new-chat {
+  gap: 6px;
+}
+
+/* 未完成的一轮：说明文字紧跟在那句提问下面，不额外加边框免得像另一个回答 */
+.pending-note {
+  margin: -2px 0 6px;
+  padding-left: 2px;
 }
 
 .spin {

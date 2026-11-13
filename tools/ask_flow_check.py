@@ -200,14 +200,83 @@ def main() -> int:
     # ---------- 7.5 原样重问：续在原会话里，不新增同题记录 ----------
     rows_before = c.eval("document.querySelectorAll('.history-list button').length")
     c.eval("document.querySelector('.send').click(); true")
-    answered_again = c.wait_for("!!document.querySelector('.answer-text')", 150)
+    # 判据不能是"页面里有 .answer-text"：上一轮铺出来的历史里也有一个 .answer-text，
+    # 于是 wait_for 立刻返回，紧接着就切页——请求还在飞，第 8 步就测成了"少一轮"。
+    # 必须等**第 2 个**答案块出现（历史 1 个 + 本轮 1 个）。
+    answered_again = c.wait_for(
+        "document.querySelectorAll('.answer-text').length >= 2", 150)
     time.sleep(0.8)
     rows_after = c.eval("document.querySelectorAll('.history-list button').length")
     check("原样重问续在原会话里（历史不新增一行）",
           answered_again and rows_after == rows_before,
-          f"历史 {rows_before} → {rows_after} 行")
+          f"历史 {rows_before} → {rows_after} 行 · 答案块 "
+          f"{c.eval('document.querySelectorAll(\".answer-text\").length')} 个")
 
-    # ---------- 8. 原文链接落到知识库对应文件 ----------
+    # ---------- 8. 切页再回来：对话不能丢（R3 修的真实缺陷） ----------
+    #
+    # 缺陷原貌：Vue 的 <router-view> 切走时 AskView 卸载，answer/refusal 等 ref
+    # 一起消失，用户点一下「政策知识库」再点回来，刚才那段解答变成欢迎页。
+    # 数据一直在库里，丢的只是内存。这几条断言把"切回来还在"钉死，
+    # 也顺手钉住"卸载不许清缓存"与"坏缓存要自愈"。
+    turns_before = c.eval("document.querySelectorAll('.turn-bot').length")
+    body_before = c.eval("""(() => {
+      const el = document.querySelector('.answer-text');
+      return el ? el.innerText.slice(0, 40) : '';
+    })()""")
+    c.goto(f"{base}/library")
+    c.wait_for("location.pathname === '/library'", 15)
+    time.sleep(0.5)
+    c.goto(f"{base}/ask")
+    c.wait_for("!!document.querySelector('.chat-main')", 20)
+    time.sleep(1.0)
+    turns_after = c.eval("document.querySelectorAll('.turn-bot').length")
+    body_after = c.eval("""(() => {
+      const el = document.querySelector('.answer-text');
+      return el ? el.innerText.slice(0, 40) : '';
+    })()""")
+    check("切到知识库再回来，对话轮次还在",
+          turns_after >= turns_before and turns_after > 0,
+          f"{turns_before} → {turns_after} 轮")
+    check("切回来看到的还是刚才那段解答", bool(body_after) and body_after == body_before,
+          f"{body_after!r}")
+    check("切回来不是欢迎页", "校园政策，问一句就够" not in text())
+    cached = c.eval("sessionStorage.getItem('campus_qa_session') || ''")
+    check("会话已落进 sessionStorage", "conversationId" in (cached or ""),
+          f"{len(cached or '')} 字节")
+    c.shot(str(out / "06-ask-after-switch.png"))
+
+    # ---------- 8.5 坏缓存自愈 ----------
+    c.eval("sessionStorage.setItem('campus_qa_session', '{坏掉的 JSON'); true")
+    c.goto(f"{base}/library")
+    time.sleep(0.4)
+    c.goto(f"{base}/ask")
+    c.wait_for("!!document.querySelector('.chat-main')", 20)
+    time.sleep(0.8)
+    healed = c.eval("!!document.querySelector('.composer-box textarea')")
+    cleared = c.eval("sessionStorage.getItem('campus_qa_session')")
+    check("坏掉的缓存不会把页面弄白", healed, "输入框仍在")
+    check("坏缓存被清掉而不是每次进页面都解析一次", cleared is None, f"{cleared!r}")
+
+    # ---------- 8.6 只有「新对话」才清空 ----------
+    c.eval(f"""(() => {{
+      const el = document.querySelector('.composer-box textarea');
+      el.value = {QUESTION!r};
+      el.dispatchEvent(new Event('input', {{bubbles: true}}));
+      return true;
+    }})()""")
+    c.eval("document.querySelector('.send').click(); true")
+    c.wait_for("!!document.querySelector('.answer-text')", 150)
+    time.sleep(0.6)
+    has_new_chat = c.eval("!!document.querySelector('.new-chat')")
+    check("有对话时出现「新对话」按钮", has_new_chat)
+    if has_new_chat:
+        c.eval("document.querySelector('.new-chat').click(); true")
+        time.sleep(0.6)
+        check("点「新对话」回到欢迎区", "校园政策，问一句就够" in text())
+        store_empty = c.eval("sessionStorage.getItem('campus_qa_session')")
+        check("点「新对话」清掉缓存", store_empty is None, f"{store_empty!r}")
+
+    # ---------- 9. 原文链接落到知识库对应文件 ----------
     href = (links or [{}])[0].get("href") or ""
     if href:
         c.goto(base + href)

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { api, getToken, setToken, type LoginResult, type User } from '../api/client'
+import { useQAStore } from './qa'
 
 /**
  * 用户信息也写进 localStorage（`zxx_user`）。
@@ -77,7 +78,16 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
+    /**
+     * 登出：清令牌、清用户，**并清问答会话缓存**。
+     *
+     * 问答缓存落在 sessionStorage，不随登录态失效。不清的话，同一台机器换个人登录，
+     * 一进问答页就能看到上一个人的提问与解答——这是隐私泄漏，不只是体验问题。
+     * 放在 store 里而不是 App.vue 的按钮里，是因为 `restore()` 失败时也会走到这里
+     * （令牌过期、被别处注销），那条路径同样要清。
+     */
     logout() {
+      useQAStore().clear()
       this.token = null
       this.user = null
       setToken(null)
