@@ -211,3 +211,64 @@ def test_no_candidates_means_no_suggestions(app, kb):
     """没答出来的时候不要编建议：这时界面上展示的是拒答卡。"""
     with app.app_context():
         assert build_next_questions("奖助学金", []) == []
+
+
+# ---------------------------------------------------------------- 拒答建议
+
+def test_refusal_only_offers_a_related_document(app, kb):
+    """拒答建议里的书名号问句只在候选「确实沾边」时给。
+
+    实测现场：问「学校游泳馆的年卡怎么办」（库里没有），被拦下的最高候选只有 0.25
+    （图书馆自习空间）。第一版没有门槛，把它包成「《图书馆…办法》里还有哪些相关规定？」，
+    用户点进去——锚定跳过了闸门，可模型看完片段仍然拒答，承诺落空。
+    **建议的可信度必须比闸门更严**：闸门放行噪声只是多花一次调用，建议放行噪声是再失望一次。
+    """
+    from app.qa import _refusal_payload
+    from app.retrieval import RetrievalOutcome
+
+    def _rejected(coverage: float) -> Candidate:
+        return Candidate(index=1, chunk_id="c1", document_id="d1",
+                         document_title="图书馆借阅与自习空间管理办法",
+                         content="第一章 开放时间 图书馆周一至周日开放。",
+                         page_number=None, section_title="第一章 开放时间",
+                         score=1.0, coverage=coverage)
+
+    with app.app_context():
+        weak = _refusal_payload("学校游泳馆的年卡怎么办",
+                                RetrievalOutcome(rejected=[_rejected(0.25)]), "证据不足")
+        strong = _refusal_payload("图书馆几点开门",
+                                  RetrievalOutcome(rejected=[_rejected(0.75)]), "证据不足")
+
+    assert not any("？" in tip for tip in weak["suggestions"]), "噪声候选不该变成建议"
+    assert any("《" in tip and "？" in tip for tip in strong["suggestions"]), \
+        "候选够相关时才给书名号问句"
+
+
+# ---------------------------------------------------------------- 拒答建议
+
+def test_refusal_only_offers_a_related_document(app, kb):
+    """拒答建议里的书名号问句只在候选「确实沾边」时给。
+
+    实测现场：问「学校游泳馆的年卡怎么办」（库里没有），被拦下的最高候选只有 0.25
+    （图书馆自习空间）。第一版没有门槛，把它包成「《图书馆…办法》里还有哪些相关规定？」，
+    用户点进去——锚定跳过了闸门，可模型看完片段仍然拒答，承诺落空。
+    **建议的可信度必须比闸门更严**：闸门放行噪声只是多花一次调用，建议放行噪声是再失望一次。
+    """
+    from app.qa import _refusal_payload
+    from app.retrieval import RetrievalOutcome
+
+    def _rejected(coverage: float) -> Candidate:
+        return Candidate(index=1, chunk_id="c1", document_id="d1",
+                         document_title="图书馆借阅与自习空间管理办法",
+                         content="第一章 开放时间 图书馆周一至周日开放。",
+                         page_number=None, section_title="第一章 开放时间",
+                         score=1.0, coverage=coverage)
+
+    with app.app_context():
+        weak = _refusal_payload("学校游泳馆的年卡怎么办",
+                                RetrievalOutcome(rejected=[_rejected(0.25)]), "证据不足")
+        strong = _refusal_payload("图书馆几点开门",
+                                  RetrievalOutcome(rejected=[_rejected(0.75)]), "证据不足")
+
+    assert not any("？" in tip for tip in weak["suggestions"]), "噪声候选不该变成建议"
+    assert any("《" in tip and "？" in tip for tip in strong["suggestions"]),         "候选够相关时才给书名号问句"

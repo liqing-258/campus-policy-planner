@@ -249,6 +249,13 @@ NEXT_QUESTION_LIMIT = 3
 # 猜错了最多是少给一条建议，不会影响答案。
 _PENALTY_HINTS = ("违规", "处分", "申诉", "处理", "违约", "处罚", "纪律")
 
+# 拒答时"就这份文件继续问"的最低覆盖率。**低于它的候选是噪声，不能包装成建议**：
+# 实测问「学校游泳馆的年卡怎么办」（库里没有）时，被拦下的最高候选只有 0.25
+# （图书馆自习空间），把它做成"《图书馆…办法》里还有哪些相关规定？"，
+# 用户点进去——锚定确实跳过了闸门，可模型看完那些片段仍然拒答。
+# **建议的可信度要比闸门更严，不是更松。**
+REFUSAL_SUGGEST_MIN_COVERAGE = 0.5
+
 
 def _sections(document_id: str) -> list[str]:
     """某份文件的章节标题（按文件内顺序、去重）。
@@ -400,7 +407,9 @@ def _refusal_payload(question: str, outcome: RetrievalOutcome,
     ]
     if outcome.rejected:
         best = outcome.rejected[0]
-        if best.document_title:
+        # 只在这份文件"确实沾边"时才给这条。0.25 那种是词面噪声（问游泳馆，候选是图书馆自习空间），
+        # 给它做一个书名号建议等于把用户送进第二次拒答——比不给建议更糟。
+        if best.document_title and best.coverage >= REFUSAL_SUGGEST_MIN_COVERAGE:
             suggestions.insert(
                 0, f"《{best.document_title}》里还有哪些与这个问题相关的规定？")
     return {
