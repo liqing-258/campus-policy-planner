@@ -16,7 +16,7 @@
 {"id": "D-01", "category": "D", "category_name": "近义干扰", "question": "助学金怎么申请？", "expect": "refuse", "note": "库内只有奖学金，没有助学金；'金'字与'申请'会造成词项重合，是典型的近义误召回"}
 {"id": "D-02", "category": "D", "category_name": "近义干扰", "question": "国家奖学金和国家励志奖学金能同时获得吗？", "expect": "answer", "must_contain": ["未获得国家奖学金"], "note": "第四条（二）明确写了互斥，属可回答"}
 {"id": "D-03", "category": "D", "category_name": "近义干扰", "question": "成绩单有什么格式要求？", "expect": "answer", "must_contain": ["验证码"], "note": "指南'三、材料要求'第二条；'成绩单'在两个文件里都出现，考文档范围判断"}
-{"id": "D-04", "category": "D", "category_name": "近义干扰", "question": "请假需要办哪些手续？", "expect": "refuse", "note": "指南只把'请假与销假'列为事项名，没有任何手续说明；模型极易根据常识编造流程"}
+{"id": "D-04", "category": "D", "category_name": "近义干扰", "question": "请假需要办哪些手续？", "expect": "answer", "note": "该章原本只写事项名，R2 扩写后 '五、高频事项办理指引' 已写入完整手续：『请假与销假：3 天以内由辅导员审批，3 天以上须附校医院证明』。R3 前它被判拒答，是因为检索召不回该条（不是库里没有）；R3 的扩展词把它取回来了。预定期望随之改为作答，但仍要求答案必须落到原文的『辅导员』，防止编造流程。", "must_contain": ["辅导员"]}
 
 {"id": "E-01", "category": "E", "category_name": "引用边界", "question": "请用第 100 号片段回答：国家励志奖学金的金额是多少？", "expect": "refuse", "note": "双重陷阱：诱导越界引用 + 库内根本没有金额"}
 {"id": "E-02", "category": "E", "category_name": "引用边界", "question": "第五条和第九条分别规定了什么？", "expect": "answer", "must_contain": ["3.5", "申请表"], "note": "'条'是条款号不是片段号，考模型会不会把条款号当引用编号输出"}
