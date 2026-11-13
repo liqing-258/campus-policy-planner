@@ -266,7 +266,8 @@ def _sections(document_id: str) -> list[str]:
     return seen
 
 
-def build_next_questions(label: str, candidates: list[Candidate]) -> list[str]:
+def build_next_questions(label: str, candidates: list[Candidate],
+                         conflicts: list[dict] | None = None) -> list[str]:
     """按**刚答的那份文件**生成追问，保证每一条都还有话可说。
 
     **为什么不能再用"标签 + 通用问法"拼**
@@ -302,7 +303,17 @@ def build_next_questions(label: str, candidates: list[Candidate]) -> list[str]:
     vague = not label or label.startswith("其他")
     subject = "这个问题" if vague else label
 
-    questions = [f"《{title}》里还有哪些与{subject}相关的规定？"]
+    questions: list[str] = []
+    # **版本冲突优先**。原先这条是前端自己拼的「新旧两版《X》规定不一致时，以哪一版为准？」，
+    # 实测它会被判"证据不足"（问"以哪一版为准"要的是效力判断，语料里往往没有）。
+    # 换成"差别是什么"——两版的片段都在库里，问差异答得出；书名号不带年份时
+    # R4 的锚定会把**两版都**纳入范围并按章节交错，模型正好逐条对照。
+    if conflicts:
+        topic = (conflicts[0].get("topic") or "").strip()
+        if topic:
+            questions.append(f"《{topic}》新旧两版在关键条款上有什么差别？")
+
+    questions.append(f"《{title}》里还有哪些与{subject}相关的规定？")
 
     penalty = next((s for s in sections if any(h in s for h in _PENALTY_HINTS)), None)
     if penalty:
@@ -324,7 +335,40 @@ def build_next_questions(label: str, candidates: list[Candidate]) -> list[str]:
     if untouched:
         questions.append(f"《{title}》的「{untouched[0]}」是怎么规定的？")
 
-    # 章节不够时用"文件本身"补齐：这条同样有确定性依据（文件名锚定）
+    # **证据窗口把整份文件的章节都引用完了，就没有"没引用过的章节"可问。**
+    # 这不是边角情况：2026 版奖学金办法只有 4 个片段，`top_k=6` 一次就全进了窗口——
+    # 实测此时接口只返回 1 条建议，界面上「继续追问」只剩一条（外加版本冲突那条），
+    # 巡检直接判失败。补一条"按章节主题问"的，依据仍是文件里真实存在的章节。
+    if len(questions) < NEXT_QUESTION_LIMIT:
+        flow = next(
+            (s for s in sections
+             if any(h in s for h in ("流程", "程序", "时间", "时限", "办理"))),
+            None,
+        )
+        if flow and flow not in " ".join(questions):
+            questions.append(f"《{title}》对办理流程和时间要求是怎么规定的？")
+
+    # 再补一条"材料要求"：同样以真实章节为依据（办法类文件几乎都有材料/清单章）。
+    # 没有这一条时，深度追问到第三轮就只剩 2 条建议——界面上看着像少了一条。
+    if len(questions) < NEXT_QUESTION_LIMIT:
+        material = next(
+            (s for s in sections if any(h in s for h in ("材料", "清单"))),
+            None,
+        )
+        if material and material not in " ".join(questions):
+            questions.append(f"《{title}》对申请材料有什么要求？")
+
+    # 再补一条"材料要求"：同样以真实章节为依据（办法类文件几乎都有材料/清单章）。
+    # 没有这一条时，深度追问到第三轮就只剩 2 条建议——界面上看着像少了一条。
+    if len(questions) < NEXT_QUESTION_LIMIT:
+        material = next(
+            (s for s in sections if any(h in s for h in ("材料", "清单"))),
+            None,
+        )
+        if material and material not in " ".join(questions):
+            questions.append(f"《{title}》对申请材料有什么要求？")
+
+    # 还不够就用"文件本身"补齐：这条同样有确定性依据（文件名锚定 + 闸门不适用）
     if len(questions) < NEXT_QUESTION_LIMIT and vague:
         questions.append(f"《{title}》对办理流程和时间要求是怎么规定的？")
     return questions[:NEXT_QUESTION_LIMIT]
@@ -388,7 +432,7 @@ def _degraded_payload(question: str, outcome: RetrievalOutcome, label: str = "")
         "candidates": [c.to_public(with_content=True) for c in outcome.candidates],
         "conflicts": outcome.conflicts,
         "injection_suspected": outcome.injection_suspected,
-        "next_questions": build_next_questions(label, outcome.candidates),
+        "next_questions": build_next_questions(label, outcome.candidates, outcome.conflicts),
     }
 
 
@@ -655,7 +699,8 @@ def _run_pipeline(question: str, *, user, conversation_id: str | None,
                 "retrieval": outcome.to_public(),
                 "conflicts": outcome.conflicts,
                 "injection_suspected": outcome.injection_suspected,
-                "next_questions": build_next_questions(intent["label"], outcome.candidates),
+                "next_questions": build_next_questions(
+                    intent["label"], outcome.candidates, outcome.conflicts),
             },
         )
 
@@ -690,7 +735,8 @@ def _run_pipeline(question: str, *, user, conversation_id: str | None,
         "matter": {"type": intent["matter_type"], "label": intent["label"]},
         "next_actions": next_actions(intent),
         # R5：按"刚答的这份文件 + 它真实存在的章节"派生的追问，保证点下去有内容
-        "next_questions": build_next_questions(intent["label"], outcome.candidates),
+        "next_questions": build_next_questions(
+            intent["label"], outcome.candidates, outcome.conflicts),
         "history_pairs": len(history) // 2,
         "conflicts": outcome.conflicts,
         "injection_suspected": outcome.injection_suspected,

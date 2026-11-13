@@ -137,6 +137,68 @@ def test_section_question_skips_what_was_already_cited(app, kb):
     assert "门诊与急诊" not in asked and "医保与报销" not in asked
 
 
+def test_version_conflict_question_comes_first(app, kb):
+    """有版本冲突时，第一条问"两版差别"而不是"以哪一版为准"。
+
+    后者要的是**效力判断**（哪版有效），语料里通常没有；实测被拒答。
+    换成就两版条款做对比，两版的片段都在库里，答得出。
+    """
+    title = "示例大学本科生奖学金评审办法"
+    with app.app_context():
+        questions = build_next_questions(
+            "奖助学金", _candidates(title, SECTIONS_BAN),
+            [{"topic": "示例大学本科生奖学金评审办法"}],
+        )
+    assert questions[0] == "《示例大学本科生奖学金评审办法》新旧两版在关键条款上有什么差别？"
+    assert len(questions) <= NEXT_QUESTION_LIMIT
+
+
+def test_version_conflict_question_comes_first(app, kb):
+    """有版本冲突时，第一条问"两版差别"而不是"以哪一版为准"。
+
+    后者要的是**效力判断**（哪版有效），语料里通常没有；实测被拒答。
+    换成就两版条款做对比，两版的片段都在库里，答得出。
+    """
+    title = "示例大学本科生奖学金评审办法"
+    with app.app_context():
+        questions = build_next_questions(
+            "奖助学金", _candidates(title, SECTIONS_BAN),
+            [{"topic": "示例大学本科生奖学金评审办法"}],
+        )
+    assert questions[0] == "《示例大学本科生奖学金评审办法》新旧两版在关键条款上有什么差别？"
+    assert len(questions) <= NEXT_QUESTION_LIMIT
+
+
+def test_full_evidence_window_still_offers_follow_ups(app, kb):
+    """证据窗口把整份文件的章节都引用完了，仍要给出追问。
+
+    实测现场：2026 版奖学金办法只有 4 个片段，`top_k=6` 一次全进窗口，
+    "没引用过的章节"为空 → 接口只返回 1 条建议，界面上「继续追问」只剩一条
+    （外加版本冲突那条），界面巡检直接判失败。
+    """
+    title = "示例大学本科生奖学金评审办法"
+    with app.app_context():
+        candidates = _candidates(title, SECTIONS_BAN, cited=len(SECTIONS_BAN))
+        questions = build_next_questions("奖助学金", candidates)
+    assert len(questions) >= 2
+    assert any("办理流程和时间要求" in q for q in questions)
+
+
+def test_full_evidence_window_still_offers_follow_ups(app, kb):
+    """证据窗口把整份文件的章节都引用完了，仍要给出追问。
+
+    实测现场：2026 版奖学金办法只有 4 个片段，`top_k=6` 一次全进窗口，
+    "没引用过的章节"为空 → 接口只返回 1 条建议，界面上「继续追问」只剩一条
+    （外加版本冲突那条），界面巡检直接判失败。
+    """
+    title = "示例大学本科生奖学金评审办法"
+    with app.app_context():
+        candidates = _candidates(title, SECTIONS_BAN, cited=len(SECTIONS_BAN))
+        questions = build_next_questions("奖助学金", candidates)
+    assert len(questions) >= 2
+    assert any("办理流程和时间要求" in q for q in questions)
+
+
 def test_limit_and_dedupe(app, kb):
     title = "示例大学本科生奖学金评审办法"
     with app.app_context():

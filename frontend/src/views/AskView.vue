@@ -503,12 +503,14 @@ const followUps = computed<string[]>(() => {
   const doc = sources.value[0]?.title
   const out: string[] = []
 
-  if (relatedConflict.value) {
-    out.push(`新旧两版《${relatedConflict.value.topic}》规定不一致时，以哪一版为准？`)
-  }
   if (refusal.value) {
-    // 拒答时后端会把"被拦下的候选"变成一条书名号追问，点了就能看到那份文件的原文
-    out.push(...refusal.value.suggestions)
+    /**
+     * 拒答时的建议混着两类东西：**问题**（"《X》里还有哪些与这个问题相关的规定？"）
+     * 与**提示语**（"换一种说法提问"）。早先两种都做成 chip，用户点提示语等于把这句话
+     * 当问题发出去——必然再吃一次拒答。这里只把问句做成 chip，提示语在拒答卡里以文字展示。
+     */
+    const questions = (refusal.value.suggestions ?? []).filter((s) => s.includes('？'))
+    out.push(...questions)
     return Array.from(new Set(out.filter((s) => s.trim().length > 0))).slice(0, 3)
   }
 
@@ -534,6 +536,10 @@ const followUps = computed<string[]>(() => {
    * 拿它造句会得到"其他事项需要准备哪些材料？"——读着像废话，点下去也答不出东西，
    * 所以这一支换成文件名。
    */
+  if (relatedConflict.value) {
+    // 旧后端兜底：新后端已把这条放进 next_questions（问法是"差别是什么"，可答）
+    out.push(`《${relatedConflict.value.topic}》新旧两版在关键条款上有什么差别？`)
+  }
   const vague = /^其他/.test(label)
   if (vague && doc) {
     out.push(`《${doc}》里还有哪些与这个问题相关的规定？`)
@@ -923,6 +929,22 @@ onBeforeUnmount(() => {
               检索范围：{{ refusal.retrieval.index_size }} 个片段，命中 {{ refusal.retrieval.total_hits }} 条，
               覆盖率阈值 {{ (refusal.retrieval.min_coverage * 100).toFixed(0) }}%。
             </p>
+
+            <!--
+              这些是**提示**不是问题：做成 chip 会被当成问句发出去，再吃一次拒答。
+              所以在这里以文字呈现；可点击的是下方「继续追问」里那几条问句。
+            -->
+            <ul v-if="refusal.suggestions.length" class="refusal-tips">
+              <li v-for="tip in refusal.suggestions" :key="tip" class="muted small">{{ tip }}</li>
+            </ul>
+
+            <!--
+              这些是**提示**不是问题：做成 chip 会被当成问句发出去，再吃一次拒答。
+              所以在这里以文字呈现；可点击的是下方「继续追问」里那几条问句。
+            -->
+            <ul v-if="refusal.suggestions.length" class="refusal-tips">
+              <li v-for="tip in refusal.suggestions" :key="tip" class="muted small">{{ tip }}</li>
+            </ul>
 
             <div v-if="refusal.rejected_candidates.length" class="sub-block">
               <h4 class="sec-title">被覆盖率闸门拦下的片段</h4>
