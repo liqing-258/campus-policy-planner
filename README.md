@@ -496,6 +496,7 @@ curl -X POST http://127.0.0.1:5000/api/v1/qa/ask ^
 .venv\Scripts\python.exe -m pytest                # 全量 278 项全绿（本机约 157 秒）
 .venv\Scripts\python.exe tools\dump_routes.py --expect 31   # 真实接口数（M7 仍为 31 条）
 .venv\Scripts\python.exe tools\run_eval.py        # 24 条评测集，门禁 2 项（约 50 秒，会真实调模型）
+.venv\Scripts\python.exe tools\followup_probe.py --clean  # 18 份 × 追问建议可答性（约 3 分钟，真实调模型）
 .venv\Scripts\python.exe tools\e2e_gate.py        # M3 端到端 10 项（M3 交付，仍应全过）
 .venv\Scripts\python.exe tools\verify_exe.py      # M7：exe 三场景自检（裸 exe / 带库交付 / 当服务跑）
 .venv\Scripts\python.exe tools\browser_check.py   # M7：7 页真实渲染巡检（需先起服务）
