@@ -240,6 +240,96 @@ def check_citations(answer: LlmAnswer, candidates: list[Candidate]) -> tuple[lis
     return citations, rejected
 
 
+# ============================================================ 追问建议
+# 追问条数与"同一文件里最多给几条"分开写：条数是界面约束（输入框上方一行放三条），
+# 章节数决定"除了点名文件之外还能问什么"，两者不是一回事。
+NEXT_QUESTION_LIMIT = 3
+
+# 判定"这份文件里有违规/处理类内容"的词。**只用于挑追问，不参与检索与拒答**——
+# 猜错了最多是少给一条建议，不会影响答案。
+_PENALTY_HINTS = ("违规", "处分", "申诉", "处理", "违约", "处罚", "纪律")
+
+
+def _sections(document_id: str) -> list[str]:
+    """某份文件的章节标题（按文件内顺序、去重）。
+
+    直接用索引里的片段标题，不查库：问答链路已经在内存索引上跑，
+    再回表查一次等于为了三个字符串多一次 IO。
+    """
+    from app.indexing import get_index
+
+    seen: list[str] = []
+    for chunk in get_index().chunks_of(document_id):
+        title = (chunk.section_title or "").strip()
+        if title and title not in seen:
+            seen.append(title)
+    return seen
+
+
+def build_next_questions(label: str, candidates: list[Candidate]) -> list[str]:
+    """按**刚答的那份文件**生成追问，保证每一条都还有话可说。
+
+    **为什么不能再用"标签 + 通用问法"拼**
+
+    R3/R4 的追问是前端用意图标签拼的：`{label}需要准备哪些材料？`、
+    `{label}的申请截止时间和办理流程是什么？`。标签是分类器的输出，**不是语料承诺**：
+
+        问「课程考核怎么算平时分」→ label「学分与成绩」→ 追问「学分与成绩的申请截止时间…」
+        问「校园卡补办多少钱」   → label「其他事项」  → 追问「其他事项需要准备哪些材料？」
+
+    这两句在任何一份文件里都找不到答案——不是检索差，是**问法本身没有对应语料**。
+    实测 18 份文件 × 3 条追问，这类"点下去必拒答"的占 9 条。
+
+    改成从证据本身派生之后，每条追问都有确定性依据：
+
+    | 追问 | 依据 | 为什么一定答得出 |
+    | --- | --- | --- |
+    | 《X》里还有哪些与{label}相关的规定？ | 刚引用的文件 | R4 的书名号锚定：范围就是 X，闸门不适用 |
+    | 不符合《X》规定的情况会怎么处理？ | X 里存在违规/处理类章节 | 章节真实存在，只在存在时才给 |
+    | 《X》的「第 N 章 …」是怎么规定的？ | X 里**未被引用**的章节 | 该章节的正文确实在库里 |
+
+    第三条刻意挑"这轮没引用到的章节"：用户刚看完第二章，接着问第三章才有意义；
+    若所有章节都已引用，则不给这一条（宁可少一条，也不给一条没内容的）。
+    """
+    if not candidates:
+        return []
+    primary = candidates[0]
+    title = primary.document_title or ""
+    if not title:
+        return []
+    sections = _sections(primary.document_id)
+    cited = {c.section_title for c in candidates if c.section_title}
+    vague = not label or label.startswith("其他")
+    subject = "这个问题" if vague else label
+
+    questions = [f"《{title}》里还有哪些与{subject}相关的规定？"]
+
+    penalty = next((s for s in sections if any(h in s for h in _PENALTY_HINTS)), None)
+    if penalty:
+        # 「不符合…会怎么处理」预设了这份文件是**义务性规范**。两类文件不适用：
+        #   ① 处分类文件本身——问《违纪处分与申诉管理办法》"不符合规定怎么处理"是套娃，
+        #      模型判"证据不足"（实测唯一失败项）；
+        #   ② 指南类文件（校医院、食堂）——读者没有"遵守/违反"关系，模型同样会判不足，
+        #      而且这一条在两次实测里来回摇摆（同一句话一次答出、一次拒答）。
+        # 不适用时改用**章节标题**提问：那个章节的正文确实在库里，问法也不预设义务。
+        obligational = any(word in title for word in ("办法", "规定", "细则", "规则", "准则"))
+        circular = any(word in title for word in ("违纪", "处分", "申诉"))
+        if obligational and not circular:
+            questions.append(f"不符合《{title}》规定的情况会怎么处理？")
+        else:
+            questions.append(f"《{title}》的「{penalty}」是怎么规定的？")
+            penalty = None  # 已经用掉了，不要在同一条建议里出现两次
+
+    untouched = [s for s in sections if s not in cited and s != penalty]
+    if untouched:
+        questions.append(f"《{title}》的「{untouched[0]}」是怎么规定的？")
+
+    # 章节不够时用"文件本身"补齐：这条同样有确定性依据（文件名锚定）
+    if len(questions) < NEXT_QUESTION_LIMIT and vague:
+        questions.append(f"《{title}》对办理流程和时间要求是怎么规定的？")
+    return questions[:NEXT_QUESTION_LIMIT]
+
+
 # ============================================================ 拒答与降级
 def _refusal_payload(question: str, outcome: RetrievalOutcome,
                      reason: str, conversation_id: str | None = None) -> dict:
@@ -253,7 +343,22 @@ def _refusal_payload(question: str, outcome: RetrievalOutcome,
     早先这里没有这个字段，前端读到 `undefined` 后把会话 id 清成空串——
     于是"问一句 → 被拒答 → 再追问"变成另起一条新会话，上一轮问题不在历史里，
     指代词再也还原不出来。拒答不等于会话结束，它只是这一轮没有答案。
+
+    **R5：被拦下的候选能变出一条"点了就有答案"的追问。** 拒答时手里有
+    `rejected`（过了词面、没过阈值），把它改成"就这份文件继续问"——
+    R4 的书名号锚定会跳过覆盖率闸门，所以这条建议**必然**能出证据，
+    而不是把用户丢回一句"换一种说法"。
     """
+    suggestions = [
+        "换一种说法提问，尽量使用政策原文里的措辞",
+        "确认相关政策文件已上传且解析状态为 indexed",
+        "若问题涉及具体金额或日期，先打开对应文件查看原文",
+    ]
+    if outcome.rejected:
+        best = outcome.rejected[0]
+        if best.document_title:
+            suggestions.insert(
+                0, f"《{best.document_title}》里还有哪些与这个问题相关的规定？")
     return {
         "question": question,
         "refused": True,
@@ -264,16 +369,16 @@ def _refusal_payload(question: str, outcome: RetrievalOutcome,
         "rejected_candidates": [c.to_public(with_content=True) for c in outcome.rejected],
         "conflicts": outcome.conflicts,
         "injection_suspected": outcome.injection_suspected,
-        "suggestions": [
-            "换一种说法提问，尽量使用政策原文里的措辞",
-            "确认相关政策文件已上传且解析状态为 indexed",
-            "若问题涉及具体金额或日期，先打开对应文件查看原文",
-        ],
+        "suggestions": suggestions,
     }
 
 
-def _degraded_payload(question: str, outcome: RetrievalOutcome) -> dict:
-    """未配置模型时的降级输出：不生成答案，只把最相关的原文片段摆出来。"""
+def _degraded_payload(question: str, outcome: RetrievalOutcome, label: str = "") -> dict:
+    """未配置模型时的降级输出：不生成答案，只把最相关的原文片段摆出来。
+
+    降级也要带 `next_questions`：没有模型时用户更需要"下一句问什么才答得出"，
+    而这份建议是按文件章节算的，与有没有模型无关。
+    """
     return {
         "question": question,
         "mode": "degraded",
@@ -283,6 +388,7 @@ def _degraded_payload(question: str, outcome: RetrievalOutcome) -> dict:
         "candidates": [c.to_public(with_content=True) for c in outcome.candidates],
         "conflicts": outcome.conflicts,
         "injection_suspected": outcome.injection_suspected,
+        "next_questions": build_next_questions(label, outcome.candidates),
     }
 
 
@@ -466,7 +572,7 @@ def _run_pipeline(question: str, *, user, conversation_id: str | None,
         _save_messages(conversation, question, "", None, [], None, "degraded",
                        workflow_run_id=run.id)
         db.session.commit()
-        payload = _degraded_payload(question, outcome)
+        payload = _degraded_payload(question, outcome, intent["label"])
         payload["conversation_id"] = conversation.id
         payload["workflow"] = serialize_run(run)
         raise DegradedMode(payload=payload)
@@ -549,6 +655,7 @@ def _run_pipeline(question: str, *, user, conversation_id: str | None,
                 "retrieval": outcome.to_public(),
                 "conflicts": outcome.conflicts,
                 "injection_suspected": outcome.injection_suspected,
+                "next_questions": build_next_questions(intent["label"], outcome.candidates),
             },
         )
 
@@ -582,6 +689,8 @@ def _run_pipeline(question: str, *, user, conversation_id: str | None,
         # ---------- M6 新增 ----------
         "matter": {"type": intent["matter_type"], "label": intent["label"]},
         "next_actions": next_actions(intent),
+        # R5：按"刚答的这份文件 + 它真实存在的章节"派生的追问，保证点下去有内容
+        "next_questions": build_next_questions(intent["label"], outcome.candidates),
         "history_pairs": len(history) // 2,
         "conflicts": outcome.conflicts,
         "injection_suspected": outcome.injection_suspected,
