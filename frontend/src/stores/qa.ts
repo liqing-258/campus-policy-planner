@@ -205,6 +205,16 @@ export const useQAStore = defineStore('qa', {
         this.persistTimer = 0
       }
       try {
+        // **空会话不占位**。
+        // 这一条是被实测逼出来的：点「退出」时 `clear()` 先删掉 KEY，
+        // 路由跳走又要卸载 AskView，卸载钩子里的 `writeNow()` 紧接着把
+        // `{conversationId:'', messages:[]}` 写了回去——登出后 storage 里留着一个空壳。
+        // 内容确实是空的（不泄露），但它让"清干净了没有"这件事没法用一条断言回答，
+        // 而**能一条断言回答的隐私保证**才是可信的。
+        if (!this.messages.length && !this.currentConversationId) {
+          sessionStorage.removeItem(KEY)
+          return
+        }
         sessionStorage.setItem(KEY, JSON.stringify({
           conversationId: this.currentConversationId,
           // 只存必要字段：正文裁到上限，引用只留摘要（见文件头第 3 条取舍）。
