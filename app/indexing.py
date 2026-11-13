@@ -222,6 +222,31 @@ class Bm25Index:
             "built_at": self._built_at,
         }
 
+    def documents(self) -> list[tuple[str, str]]:
+        """`(document_id, document_title)`，按标题排序、去重。
+
+        给 `app/anchors.py` 用：用户问句里写了《…》时，要靠这份清单判断
+        "他点名的是哪一份"。**不让上层去摸 `_chunks`**——那是索引内部结构，
+        换成别的索引实现（向量库）时这里仍然成立。
+        """
+        with self._lock:
+            seen: dict[str, str] = {}
+            for chunk in self._chunks:
+                seen.setdefault(chunk.document_id, chunk.document_title or "")
+        return sorted(seen.items(), key=lambda item: (item[1], item[0]))
+
+    def chunks_of(self, document_id: str) -> list[IndexedChunk]:
+        """某份文件的全部片段，按文件内顺序。
+
+        锚定到唯一一份文件、且问法是"还有哪些规定"时，证据窗口就是这份文件本身；
+        这时**文件顺序**比 BM25 名次更有意义（用户要的是"这份文件讲了什么"）。
+        """
+        with self._lock:
+            return sorted(
+                (chunk for chunk in self._chunks if chunk.document_id == document_id),
+                key=lambda chunk: chunk.chunk_index,
+            )
+
     def search(self, query: str, *, top_k: int = 6,
                document_ids: list[str] | None = None,
                min_score: float = 0.0,

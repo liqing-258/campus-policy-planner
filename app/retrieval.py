@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
-from app import injection, versions
+from app import anchors, injection, versions
 from app.indexing import SearchHit, ensure_index_loaded, get_index, tokenize
 from app.runtime import current_settings
 from shared.enums import EMBEDDING_BM25_ONLY, EMBEDDING_VECTOR
@@ -53,6 +53,10 @@ class Candidate:
     # 为什么要标出来：它同样过了覆盖率闸门，但排序上被别的片段挤掉了——
     # 标出来，评审追问"这条哪来的"时有话可说，而不是看起来像凭空多出来的证据。
     via_neighbour: bool = False
+    # 不是检索命中，而是用户用《文件名》点名了这份文件、问法又是"还有哪些规定"时，
+    # 按文件顺序摆出来的片段。**覆盖率仍然如实计算**（多半很低），不篡改数字——
+    # 标出来是为了让"这条为什么在证据里"可回答。
+    via_anchor: bool = False
     # 片段在文件内的序号，补邻片时用它找前后邻居
     chunk_index: int = 0
 
@@ -69,6 +73,7 @@ class Candidate:
             "coverage": self.coverage,
             # 前端不必为它加图标，但接口里要能看出来：这条是"紧邻补全"，不是直接命中
             "via_neighbour": self.via_neighbour,
+            "via_anchor": self.via_anchor,
         }
         if self.injection_hits:
             payload["injection"] = {
@@ -107,6 +112,10 @@ class RetrievalOutcome:
     # 两路各召回多少条、融合后候选池多大、三个词项视图各几个词项。
     # 用于解释"为什么这次多出来几条"以及"改写到底改了什么"。
     recall_paths: dict = field(default_factory=dict)
+    # 用户用《文件名》点名了库内文件时的锚定信息（见 app/anchors.py）。
+    # `anchor_gate` 只在一种情况下有值：点名 + 残余问法无主题词 → 闸门不适用。
+    anchor: dict | None = None
+    anchor_gate: str | None = None
 
     def to_public(self, *, with_content: bool = True) -> dict:
         return {
@@ -123,6 +132,9 @@ class RetrievalOutcome:
             "standalone_query": self.standalone_query,
             "expanded_terms": list(self.expanded_terms),
             "recall_paths": self.recall_paths,
+            # R4：问句里点名了哪份文件、摘掉书名号后的问法、闸门是否适用
+            "anchor": self.anchor,
+            "anchor_gate": self.anchor_gate,
         }
 
 
@@ -328,6 +340,115 @@ def _rrf(paths: list[list[SearchHit]]) -> list[str]:
     return sorted(scores, key=lambda chunk_id: scores[chunk_id], reverse=True)
 
 
+# 锚定填充时 `anchor_gate` 的取值。写成常量而不是散落的字符串字面量，
+# 因为它是对外契约的一部分（会出现在 `retrieval.anchor_gate` 与节点轨迹里）。
+ANCHOR_GATE_DOCUMENT = "document_scoped"
+
+
+def _fill_by_anchor(outcome: RetrievalOutcome, index, anchor, limit: int,
+                    a_terms: list[str], e_terms: list[str],
+                    o_terms: list[str]) -> None:
+    """点名了文件：证据窗口 = 被点名文件的片段。
+
+    **为什么这里不让覆盖率闸门说话**
+
+    闸门回答的问题是"用户问的这个主题，库里有没有"。用户写了《文件名》之后，
+    这个问题已经被"那份文件在库里"回答了；残余问法里的词只是**在文件内部指路**，
+    不再是"库里有没有这个主题"的判据。
+
+    最直接的证据是前端自己生成的三条追问模板，它们对同一份文件都成立：
+
+        《X》里还有哪些与这个问题相关的规定？      （残余：还有/问题/规定，无主题词）
+        《X》对办理流程和时间要求是怎么规定的？    （残余：办理/流程/时间/要求）
+        不符合《X》规定的情况会怎么处理？          （残余：符合/情况/处理）
+
+    第三条里"处理"在《图书馆…办法》中只覆盖到 0.2——按闸门判就该拒答，
+    可它问的明明是"这份文件怎么规定处理方式"，答不出来是检索的错，不是用户问错了。
+    统一豁免之后，三条模板走同一条路径：**把点名文件里最相关的片段摆出来**，
+    再由闸二（模型自评证据充分性）判断能不能答。§7.2.1 已经定过这个分工：
+    覆盖率只做粗筛，拒答由模型判定。
+
+    代价说清楚：问"《图书馆办法》里关于转专业的规定"，也会把图书馆的片段摆出来
+    （模型会说证据不足，降级模式只列原文）。这比"另一个文件里有转专业，就答
+    另一个文件"要正确——**用户点名了哪份文件，就答哪份文件**。
+
+    **排序**：开放式问法（摘净后没有主题词）按文件内顺序，因为这时没有可比的相关度，
+    用户要的是"这份文件讲了什么"；有主题词时按 BM25 与覆盖率排，让相关章节靠前。
+    """
+    scored: list[tuple[int, Candidate]] = []
+    doc_order = {doc_id: pos for pos, doc_id in enumerate(anchor.document_ids)}
+    for document_id in anchor.document_ids:
+        for chunk in index.chunks_of(document_id):
+            hit = _score_combined(index, a_terms, e_terms, chunk.chunk_id, o_terms)
+            found = injection.scan(chunk.content)
+            if hit is not None:
+                coverage = injection.downweight(hit.coverage) if found else hit.coverage
+                score = hit.score
+                matched = tuple(hit.matched_terms)
+                raw = hit.coverage if found else None
+            else:
+                # 残余问法一个词项都没有（用户就写了"《X》"）：无可计算的分与覆盖率。
+                # 给 0 而不是"看起来还行"的默认值——数字要能被追问。
+                coverage, score, matched, raw = 0.0, 0.0, (), None
+            candidate = Candidate(
+                index=0,
+                chunk_id=chunk.chunk_id,
+                document_id=chunk.document_id,
+                document_title=chunk.document_title,
+                content=chunk.content,
+                page_number=chunk.page_number,
+                section_title=chunk.section_title,
+                score=score,
+                coverage=coverage,
+                matched_terms=matched,
+                injection_hits=tuple(found),
+                raw_coverage=raw,
+                via_anchor=True,
+                chunk_index=chunk.chunk_index,
+            )
+            if found:
+                outcome.injection_suspected.append({
+                    "chunk_id": chunk.chunk_id,
+                    "document_title": chunk.document_title,
+                    "patterns": [h["code"] for h in found],
+                    "original_coverage": round(hit.coverage, 4) if hit is not None else 0.0,
+                    "adjusted_coverage": coverage,
+                    # 点名文件的片段不会因为注入疑点被丢掉：用户要看的是原文
+                    "kept": True,
+                    "via": "anchor",
+                })
+            scored.append((doc_order.get(document_id, 0), candidate))
+
+    outcome.total_hits = len(scored)
+    if anchor.open_query:
+        # 文件内顺序。**多版本时按章节交错**（第一章×2、第二章×2…）而不是
+        # 把 2025 版排完再排 2026 版：窗口只有 6 条，先排完一份就把另一份挤掉了，
+        # 而"两版差别在哪"恰恰是用户点名时的真实问题。
+        scored.sort(key=lambda item: (item[1].chunk_index, item[0]))
+    else:
+        scored.sort(key=lambda item: (item[1].coverage, item[1].score), reverse=True)
+
+    picked = [candidate for _, candidate in scored[:limit]]
+    for position, candidate in enumerate(picked, 1):
+        candidate.index = position
+    outcome.candidates = picked
+    # **闸门不适用**——不是"放宽阈值"，是把这件事记下来，让轨迹能解释
+    outcome.anchor_gate = ANCHOR_GATE_DOCUMENT
+    outcome.top_coverage = max((c.coverage for c in picked), default=None)
+    outcome.recall_paths = {
+        "original": 0, "standalone": 0, "expanded": 0,
+        "fused": 0, "rrf": False, "anchored": len(picked),
+        "terms": {"original": len(o_terms), "standalone": len(a_terms),
+                  "expanded": len(e_terms)},
+    }
+    if not picked:
+        # 点名了文件、但库里那份文件没有任何片段：这是真的没证据。
+        outcome.refused = True
+        outcome.refuse_reason = "被点名的文件中没有可检索的片段"
+        return
+    outcome.conflicts = versions.detect(outcome.candidates)
+
+
 def retrieve(query: str, *, top_k: int | None = None,
              document_ids: list[str] | None = None,
              min_coverage: float | None = None,
@@ -342,6 +463,14 @@ def retrieve(query: str, *, top_k: int | None = None,
     两路用 RRF 融合决定谁进候选池；覆盖率闸门取"用户原话 / 自包含查询 / 扩展词"
     三个视图的最高值（见 `_score_combined`），保证**改写只做加法**。
     不给这两个参数时行为与 R2 完全一致（单路 + 原查询），便于对比与回滚。
+
+    **R4 起识别"点名文件"**：问句里有《文件名》且能对上库内文件时（`app/anchors.py`），
+    把书名号换成核心名（去掉年份/版本括号）再检索、把范围收窄到被点名的文件，
+    并**不再施加覆盖率闸门**——用户点名了哪份文件，就答哪份文件；能不能答由闸二判。
+    这是**确定性规则**，不依赖模型：降级路径（无 API Key）同样生效。
+    这一条修的是实测缺陷：问《…（2026年版）》时，2026 版正文里没有"2026"这个词，
+    被点名的那份反而被自己的年份压到 0.308，整份出闸门；而 2025 版因为正文印着
+    "（2025年版）"排到第一——**系统优先给了旧版本**。
     """
     settings = current_settings()
     limit = top_k if top_k is not None else settings.rag_top_k
@@ -367,16 +496,48 @@ def retrieve(query: str, *, top_k: int | None = None,
         outcome.refuse_reason = "知识库为空：尚未上传任何已解析的政策文件，请先上传后再提问"
         return outcome
 
+    # ---------- 书名号锚定（确定性，先于任何检索） ----------
+    # 两处都试：原话里点名最可信；改写可能把文件名改写掉，所以只在原话没锚上时
+    # 再看自包含查询——反过来（先看改写）会让"改写删掉了文件名"变成静默失锚。
+    anchor = anchors.resolve(query, index.documents(), allowed=document_ids)
+    if anchor is None and standalone != query:
+        anchor = anchors.resolve(standalone, index.documents(), allowed=document_ids)
+
+    search_query = query
+    search_standalone = standalone
+    # 调用方给了文档范围就只在范围内检索（知识库页"只看这份文件"用到）。
+    # 锚定不走这条路径：它自己的范围由书名号决定，见 `_fill_by_anchor`。
+    scope = document_ids
+    if anchor is not None:
+        # 书名号换成核心名（去掉年份/版本括号）再分词：年份是指针，不是主题词。
+        # 留着它，"2026"会进覆盖率分母——而 2026 版正文里根本没有"2026"，
+        # 于是被点名的那份文件反而被压低（实测 0.308 < 0.35，整份被挡在门外）。
+        # 保留核心名同样重要：里面带着"奖学金/图书馆借阅"这类真主题词。
+        search_query = anchor.residual or query
+        search_standalone = anchors.residual_text(standalone) or standalone
+        # 开放式问法要看**摘净版**：residual 里含这份文件自己的名字，
+        # 拿它判"有没有主题词"必然判成有（自我命中）。
+        anchor = anchors.with_residual_tokens(anchor, tokenize(anchor.bare))
+        outcome.anchor = anchor.to_public()
+
     # min_coverage 传 0：这一层的闸门由本函数自己施加，索引层不再重复过滤
     pool = max(limit * 3, limit)
     # 三个词项视图：o = 用户原话（兜底 + 一路召回），a = 自包含查询（排序），
     # e = 同义扩展词（把字面不接轨的片段捞回来）
-    o_terms = tokenize(query)
-    a_terms = tokenize(standalone)
+    o_terms = tokenize(search_query)
+    a_terms = tokenize(search_standalone)
     e_terms = tokenize(" ".join(expanded)) if expanded else []
-    path_a = index.search(standalone, top_k=pool, document_ids=document_ids, min_coverage=0.0)
+
+    # **点名文件**：范围收在点名文件内，且不再过覆盖率闸门（理由见 `_fill_by_anchor`）。
+    # 残余问法里一个主题词都没有时（"还有哪些规定"），按文件内顺序摆；
+    # 有主题词时按相关度排。无论哪种，能不能答都由闸二（模型自评）判。
+    if anchor is not None:
+        _fill_by_anchor(outcome, index, anchor, limit, a_terms, e_terms, o_terms)
+        return outcome
+
+    path_a = index.search(search_standalone, top_k=pool, document_ids=scope, min_coverage=0.0)
     path_b = (
-        index.search(" ".join(expanded), top_k=pool, document_ids=document_ids, min_coverage=0.0)
+        index.search(" ".join(expanded), top_k=pool, document_ids=scope, min_coverage=0.0)
         if expanded else []
     )
 
@@ -388,7 +549,7 @@ def retrieve(query: str, *, top_k: int | None = None,
     # 词项集合相同就不重复跑了：同一路跑两遍只会在 RRF 里把这一路偷偷加权。
     path_o: list[SearchHit] = []
     if set(o_terms) != set(a_terms):
-        path_o = index.search(query, top_k=pool, document_ids=document_ids, min_coverage=0.0)
+        path_o = index.search(search_query, top_k=pool, document_ids=scope, min_coverage=0.0)
 
     fused_paths = [path_a]
     if path_b:

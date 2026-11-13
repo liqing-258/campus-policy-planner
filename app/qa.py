@@ -417,6 +417,13 @@ def _run_pipeline(question: str, *, user, conversation_id: str | None,
         )
         if rewritten.applied:
             node.summary += "；已改写查询"
+        if outcome.anchor:
+            # 点名文件是**确定性**的一步，与改写成败无关：降级模式下也生效，
+            # 所以轨迹里必须单独记一条，否则评审会以为是改写把版本认对了。
+            titles = "、".join(f"《{t}》" for t in outcome.anchor.get("titles", [])[:2])
+            node.summary += f"；按书名号锚定{titles}"
+            if outcome.anchor_gate:
+                node.summary += "（点名文件，覆盖率闸门不适用）"
         node.detail = {
             "total_hits": outcome.total_hits,
             "passed": len(outcome.candidates),
@@ -428,6 +435,9 @@ def _run_pipeline(question: str, *, user, conversation_id: str | None,
             "standalone_query": outcome.standalone_query,
             "expanded_terms": list(outcome.expanded_terms),
             "rewrite": rewritten.to_public(),
+            # 点名的是哪份文件、摘掉书名号后的问法、闸门是否适用
+            "anchor": outcome.anchor,
+            "anchor_gate": outcome.anchor_gate,
         }
         if outcome.injection_suspected:
             node.detail["injection_suspected"] = outcome.injection_suspected
