@@ -495,6 +495,37 @@ def _save_messages(conversation: Conversation, question: str, answer_text: str,
     return message
 
 
+def _persist_refused_turn(user, question: str, conversation_id: str | None,
+                          exc: ApiError) -> None:
+    """把"被拒答的那一问"写进已有会话。
+
+    **只在会话已存在时写**。第一问就被拒答时不新建会话——那会让"我的会话"里多出一条
+    没有答案的空记录，而这正是 B-12 当初选择不落库的理由（产品决策，不是技术限制）。
+    区别在于：续聊时那一问本来就属于**这条已有的会话**，补进去只是让它完整，
+    不会新增列表项。
+
+    为什么不写 `workflow_run_id`：调用点还没拿到 `run.id`（轨迹在外层 persist），
+    而拒答消息的轨迹在拒答卡里已经展示过。宁可不写，也不要在事务里再查一次。
+    """
+    if not conversation_id:
+        return
+    conversation = db.session.get(Conversation, conversation_id)
+    if conversation is None or conversation.user_id != user.id:
+        # 不是本人的会话，或已经被删：不写、不报错。这条路径不该因为"顺手记一笔"
+        # 把一次正常返回的业务态变成 500。
+        return
+    db.session.add(Message(
+        id=new_ulid(), conversation_id=conversation.id, role="user",
+        content=question.strip(), mode="refused",
+    ))
+    db.session.add(Message(
+        id=new_ulid(), conversation_id=conversation.id, role="assistant",
+        # content 非空约束：写拒答原因，前端按 mode 渲染成"未作答"卡片
+        content=exc.message or "证据不足，未能作答", mode="refused",
+    ))
+    db.session.commit()
+
+
 # ============================================================ 核心：提问
 _OUTCOME_BY_CODE = {
     INSUFFICIENT_EVIDENCE: OUTCOME_REFUSED,
@@ -550,6 +581,9 @@ def ask_question(question: str, *, user, conversation_id: str | None = None,
         exc.payload["workflow"] = serialize_run(run, include_result=True)
         if outcome == OUTCOME_FAILED:
             exc.payload["workflow"]["error"] = exc.message
+        # 拒答这一问也要进历史（B-12 的另一半）。否则"问一句 → 被拒 → 说'那它呢'"
+        # 的第三步看不到被拒的那一问，指代永远还原不出来。
+        _persist_refused_turn(user, question, conversation_id, exc)
         raise
 
 

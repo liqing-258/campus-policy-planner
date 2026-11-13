@@ -114,12 +114,18 @@ export function fromServerMessage(row: MessageRow): QAMessage {
   // 降级模式落库的助手消息正文是空串（没做归纳，只回了原文片段）。
   // 原样映射会渲染成一个没有内容的"解答"块，看起来像 bug；这里给它一句说明。
   const degradedTurn = row.role === 'assistant' && row.mode === 'degraded'
+  /**
+   * **R5 起，被拒答的那一轮也会落库**（B-12 的另一半），mode 标成 `refused`。
+   * 不按 mode 区分会让"未作答"的卡片长得像一条正常解答——内容只有一句拒答原因，
+   * 却顶着"解答"的标题。这里按 mode 还原成 refusal 块。
+   */
+  const refusedTurn = row.role === 'assistant' && row.mode === 'refused'
   return {
     role: row.role,
     content: row.content
       || (degradedTurn ? '（降级模式：本轮未做归纳，只返回了检索到的原文片段）' : ''),
     timestamp: row.created_at ?? new Date().toISOString(),
-    kind: degradedTurn ? 'degraded' : 'answer',
+    kind: refusedTurn ? 'refusal' : degradedTurn ? 'degraded' : 'answer',
     citations: slimCitations(row.citations as Citation[] | null),
   }
 }

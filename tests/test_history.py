@@ -116,3 +116,125 @@ def test_history_is_scoped_to_the_conversation(client, student_headers, seeded_p
     assert fresh["data"]["conversation_id"] != other["conversation_id"]
     prompt = mock_llm.calls["prompt"]
     assert "奖学金什么时候截止" not in prompt
+
+
+# ---------------------------------------------------------------- 拒答也进历史（R5 补 B-12）
+
+def test_refused_turn_is_written_into_the_existing_conversation(
+        client, student_headers, seeded_policy, llm_on, mock_llm, app):
+    """被拒答的那一问必须进历史，否则"被拒 → 追问"会丢掉指代对象。
+
+    B-12 原本整条不落库，理由是"第一问就被拒答会在会话列表里多出没有答案的空记录"。
+    这个理由只对**新建会话**成立：续聊时那一问本来就属于已有会话，补进去只是让它完整。
+    """
+    llm_on()
+    mock_llm(ANSWER)
+    first = ask(client, student_headers, "申请国家励志奖学金需要提交哪些材料？").get_json()
+    assert first["code"] == 0
+    conversation_id = first["data"]["conversation_id"]
+
+    # 抬到 1.0：第二问必被覆盖率闸门拦下
+    app.extensions["settings"].rag_min_coverage = 1.0
+    refused = ask(client, student_headers, "学校游泳馆的年卡怎么办？",
+                  conversation_id=conversation_id).get_json()
+    assert refused["code"] == 4001
+
+    messages = client.get(f"/api/v1/conversations/{conversation_id}/messages",
+                          headers=student_headers).get_json()["data"]["items"]
+    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"]
+    assert messages[2]["content"] == "学校游泳馆的年卡怎么办？"
+    assert messages[3]["mode"] == "refused", "助手那条要标成 refused，前端才渲染成未作答"
+
+
+def test_follow_up_after_a_refusal_can_see_the_refused_question(
+        client, student_headers, seeded_policy, llm_on, mock_llm, app):
+    """被拒之后再追问"那它要多久"，改写读到的不该是更早的一轮。"""
+    llm_on()
+    mock_llm(ANSWER)
+    conversation_id = ask(client, student_headers,
+                          "申请国家励志奖学金需要提交哪些材料？").get_json()["data"]["conversation_id"]
+
+    app.extensions["settings"].rag_min_coverage = 1.0
+    ask(client, student_headers, "学校游泳馆的年卡怎么办？",
+        conversation_id=conversation_id)
+    app.extensions["settings"].rag_min_coverage = 0.0
+
+    # 第三问刻意**不带**"游泳馆"三个字：这样 prompt 里若出现它，只能来自历史
+    third = ask(client, student_headers, "申请材料要交几份？",
+                conversation_id=conversation_id).get_json()
+    assert third["code"] == 0, third
+    assert "学校游泳馆的年卡怎么办" in mock_llm.calls["prompt"], (
+        "被拒的那一问没进历史：追问看到的上下文里没有上一句"
+    )
+
+
+def test_first_question_refusal_does_not_create_a_conversation(
+        client, student_headers, seeded_policy, llm_on, mock_llm, app):
+    """第一问就被拒答时不新建会话——B-12 当初的产品理由仍然成立。"""
+    llm_on()
+    mock_llm(ANSWER)
+    app.extensions["settings"].rag_min_coverage = 1.0
+    body = ask(client, student_headers, "学校游泳馆的年卡怎么办？").get_json()
+    assert body["code"] == 4001
+    assert body["data"]["conversation_id"] is None
+
+
+# ---------------------------------------------------------------- 拒答也进历史（R5 补 B-12）
+
+def test_refused_turn_is_written_into_the_existing_conversation(
+        client, student_headers, seeded_policy, llm_on, mock_llm, app):
+    """被拒答的那一问必须进历史，否则"被拒 → 追问"会丢掉指代对象。
+
+    B-12 原本整条不落库，理由是"第一问就被拒答会在会话列表里多出没有答案的空记录"。
+    这个理由只对**新建会话**成立：续聊时那一问本来就属于已有会话，补进去只是让它完整。
+    """
+    llm_on()
+    mock_llm(ANSWER)
+    first = ask(client, student_headers, "申请国家励志奖学金需要提交哪些材料？").get_json()
+    assert first["code"] == 0
+    conversation_id = first["data"]["conversation_id"]
+
+    # 抬到 1.0：第二问必被覆盖率闸门拦下
+    app.extensions["settings"].rag_min_coverage = 1.0
+    refused = ask(client, student_headers, "学校游泳馆的年卡怎么办？",
+                  conversation_id=conversation_id).get_json()
+    assert refused["code"] == 4001
+
+    messages = client.get(f"/api/v1/conversations/{conversation_id}/messages",
+                          headers=student_headers).get_json()["data"]["items"]
+    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"]
+    assert messages[2]["content"] == "学校游泳馆的年卡怎么办？"
+    assert messages[3]["mode"] == "refused", "助手那条要标成 refused，前端才渲染成未作答"
+
+
+def test_follow_up_after_a_refusal_can_see_the_refused_question(
+        client, student_headers, seeded_policy, llm_on, mock_llm, app):
+    """被拒之后再追问"那它要多久"，改写读到的不该是更早的一轮。"""
+    llm_on()
+    mock_llm(ANSWER)
+    conversation_id = ask(client, student_headers,
+                          "申请国家励志奖学金需要提交哪些材料？").get_json()["data"]["conversation_id"]
+
+    app.extensions["settings"].rag_min_coverage = 1.0
+    ask(client, student_headers, "学校游泳馆的年卡怎么办？",
+        conversation_id=conversation_id)
+    app.extensions["settings"].rag_min_coverage = 0.0
+
+    # 第三问刻意**不带**"游泳馆"三个字：这样 prompt 里若出现它，只能来自历史
+    third = ask(client, student_headers, "申请材料要交几份？",
+                conversation_id=conversation_id).get_json()
+    assert third["code"] == 0, third
+    assert "学校游泳馆的年卡怎么办" in mock_llm.calls["prompt"], (
+        "被拒的那一问没进历史：追问看到的上下文里没有上一句"
+    )
+
+
+def test_first_question_refusal_does_not_create_a_conversation(
+        client, student_headers, seeded_policy, llm_on, mock_llm, app):
+    """第一问就被拒答时不新建会话——B-12 当初的产品理由仍然成立。"""
+    llm_on()
+    mock_llm(ANSWER)
+    app.extensions["settings"].rag_min_coverage = 1.0
+    body = ask(client, student_headers, "学校游泳馆的年卡怎么办？").get_json()
+    assert body["code"] == 4001
+    assert body["data"]["conversation_id"] is None
