@@ -352,6 +352,11 @@ export interface AnswerData {
   // ---------- M6 ----------
   matter: { type: string; label: string }
   next_actions: NextAction[]
+  /**
+   * 后端按「刚答的这份文件 + 它真实存在的章节」派生的追问（R5）。
+   * 有就用它——它的每一条都有语料依据；没有（旧后端）才退回前端按标签拼的模板。
+   */
+  next_questions?: string[]
   /** 本轮带了几轮历史进 Prompt */
   history_pairs: number
   conflicts: VersionConflict[]
@@ -388,6 +393,8 @@ export interface DegradedData {
   conflicts?: VersionConflict[]
   injection_suspected?: InjectionSuspect[]
   workflow?: Workflow
+  /** R5：降级模式也按章节派生追问，与有没有模型无关 */
+  next_questions?: string[]
 }
 
 /** 引用被拒（4003）：模型给了答案但没有一条引用能落到原文 */

@@ -501,19 +501,41 @@ const followUps = computed<string[]>(() => {
   if (!hasResult.value) return []
   const label = matterLabel.value
   const doc = sources.value[0]?.title
-  /**
-   * 「其他事项」是意图分类没认出具体名目时的占位说法。
-   * 拿它造句会得到"其他事项需要准备哪些材料？"——读着像废话，点下去也答不出具体东西。
-   * 这时把主语换成引用到的文件名，至少让追问落在一份具体规定上。
-   */
-  const vague = /^其他/.test(label)
   const out: string[] = []
+
   if (relatedConflict.value) {
     out.push(`新旧两版《${relatedConflict.value.topic}》规定不一致时，以哪一版为准？`)
   }
   if (refusal.value) {
+    // 拒答时后端会把"被拦下的候选"变成一条书名号追问，点了就能看到那份文件的原文
     out.push(...refusal.value.suggestions)
-  } else if (vague && doc) {
+    return Array.from(new Set(out.filter((s) => s.trim().length > 0))).slice(0, 3)
+  }
+
+  /**
+   * **R5：优先用后端派生的追问。**
+   *
+   * 早先这三条是前端用意图标签拼的（`{label}需要准备哪些材料？`），
+   * 而标签是分类器的输出、不是语料承诺：问「课程考核怎么算平时分」得到
+   * 「学分与成绩的申请截止时间和办理流程是什么？」——这句话在任何文件里都找不到答案，
+   * 点下去必然拒答。实测 18 份文件 × 3 条，这类"点下去没内容"的占 9 条。
+   *
+   * 后端现在按「刚答的这份文件 + 它真实存在的章节」派生（`build_next_questions`），
+   * 每一条都有确定性依据。只有在旧后端不返回该字段时，才退回下面的本地模板。
+   */
+  const fromServer = answer.value?.next_questions ?? degraded.value?.next_questions ?? []
+  if (fromServer.length) {
+    out.push(...fromServer)
+    return Array.from(new Set(out.filter((s) => s.trim().length > 0))).slice(0, 3)
+  }
+
+  /**
+   * 兜底模板（旧后端）。「其他事项」是意图分类没认出具体名目时的占位说法，
+   * 拿它造句会得到"其他事项需要准备哪些材料？"——读着像废话，点下去也答不出东西，
+   * 所以这一支换成文件名。
+   */
+  const vague = /^其他/.test(label)
+  if (vague && doc) {
     out.push(`《${doc}》里还有哪些与这个问题相关的规定？`)
     out.push(`《${doc}》对办理流程和时间要求是怎么规定的？`)
     out.push(`不符合《${doc}》规定的情况会怎么处理？`)
