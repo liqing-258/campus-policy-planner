@@ -137,9 +137,10 @@ def chat(messages: list[dict], *, temperature: float | None = None,
 
     for attempt in range(1, retries + 2):
         try:
-            data, elapsed_ms = _post(_payload(
-                messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode))
-            return _to_result(data, elapsed_ms, attempt, messages)
+            body = _payload(
+                messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode)
+            data, elapsed_ms = _post(body)
+            return _to_result(data, elapsed_ms, attempt, messages, body["max_tokens"])
         except LlmTimeout:
             # 超时不重试：再试一次大概率还是超时，白白多等一个 timeout
             raise
@@ -150,7 +151,15 @@ def chat(messages: list[dict], *, temperature: float | None = None,
     raise last_error  # pragma: no cover - 循环必在内部 raise
 
 
-def _to_result(data: dict, elapsed_ms: int, attempt: int, messages: list[dict]) -> ChatResult:
+def _to_result(data: dict, elapsed_ms: int, attempt: int, messages: list[dict],
+               budget: int | None = None) -> ChatResult:
+    """把上游响应转成 ChatResult。
+
+    `budget` 是**本次调用实际生效的 max_tokens**，不是全局配置值。
+    早先这里直接读 `settings.llm_max_tokens`，于是"查询改写用 800 预算被推理吃光"时，
+    报错说"max_tokens=2500 被推理耗尽"——运维照着去调 LLM_MAX_TOKENS 永远调不好，
+    因为卡住的是另一个更小的数。**错误信息里的数字必须是真正生效的那个。**
+    """
     settings = current_settings()
     try:
         choice = data["choices"][0]
@@ -162,16 +171,16 @@ def _to_result(data: dict, elapsed_ms: int, attempt: int, messages: list[dict]) 
     usage = data.get("usage") or {}
     details = usage.get("completion_tokens_details") or {}
     reasoning = details.get("reasoning_tokens")
+    effective = settings.llm_max_tokens if budget is None else budget
 
     if content is None:
         content = ""
     if not str(content).strip():
         # 见模块文档第 1 条：这是**预算不足**的典型症状，不是"模型无话可说"
         if reasoning:
-            budget = settings.llm_max_tokens
             raise LlmOutputInvalid(
                 f"模型只输出了推理内容（reasoning_tokens={reasoning}），正文为空——"
-                f"max_tokens={budget} 被推理耗尽，请调大 LLM_MAX_TOKENS",
+                f"这次调用实际生效的 max_tokens={effective} 被推理耗尽，请调大对应的预算",
                 retriable=False,
             )
         raise LlmOutputInvalid(

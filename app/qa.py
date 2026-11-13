@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, request
 
-from app import llm
+from app import llm, rewrite
 from app.workflows import WorkflowRecorder, serialize_run
 from app.auth import current_user, login_required
 from app.contract import new_ulid, ok, page_args, paginated
@@ -89,10 +89,14 @@ TITLE_MAX_CHARS = 30
 
 # 多轮上下文：取最近几"轮"（一问一答算一轮）。3 轮约等于"刚才问的那个"能指代清楚，
 # 再多会明显抬高 prompt_tokens，而政策问答的追问通常不超过两层。
-HISTORY_PAIRS = 3
-# 历史里每条消息截断到多少字：助手回答常有 300–500 字，原样拼进去会让
-# 证据块在 Prompt 里的占比被挤掉，而证据才是唯一可引用的东西。
-HISTORY_MSG_MAX_CHARS = 240
+#
+# **口径只有一份**：轮数与单条截断长度都从 app/rewrite.py 取。
+# 改写（检索前）与生成（检索后）读的是同一张 messages 表，
+# 若两处各写一份常量，改了一处忘了另一处，同一句追问在两步看到的"历史"就不一样了——
+# 而"改写能还原指代"恰恰依赖这两步看到同一段上文。
+HISTORY_PAIRS = rewrite.HISTORY_PAIRS
+HISTORY_MSG_MAX_CHARS = rewrite.HISTORY_MSG_MAX_CHARS
+format_history = rewrite.format_history
 
 
 # ============================================================ Prompt 组装
@@ -158,17 +162,6 @@ def build_evidence(candidates: list[Candidate]) -> str:
         for c in candidates
     ]
     return "\n".join(blocks).strip()
-
-
-def format_history(history: list[dict]) -> str:
-    lines = []
-    for item in history:
-        role = "用户" if item["role"] == "user" else "助手"
-        text = (item["content"] or "").strip().replace("\n", " ")
-        if len(text) > HISTORY_MSG_MAX_CHARS:
-            text = text[:HISTORY_MSG_MAX_CHARS] + "…"
-        lines.append(f"{role}：{text}")
-    return "\n".join(lines)
 
 
 def build_user_prompt(question: str, candidates: list[Candidate],
@@ -249,17 +242,23 @@ def check_citations(answer: LlmAnswer, candidates: list[Candidate]) -> tuple[lis
 
 # ============================================================ 拒答与降级
 def _refusal_payload(question: str, outcome: RetrievalOutcome,
-                     reason: str) -> dict:
+                     reason: str, conversation_id: str | None = None) -> dict:
     """拒答时把"系统看到了什么"一并回传。
 
     只回一句"证据不足"是最省事的做法，也是最不负责任的：
     用户无法判断是政策库里真没有，还是阈值把自己想要的文件过滤掉了。
     这里把被覆盖率闸门拦下的候选也带上，并在 suggestions 里给出可执行的下一步。
+
+    **`conversation_id` 必须回传（R3 修复）**：前端据它决定"下一句追问续在哪个会话里"。
+    早先这里没有这个字段，前端读到 `undefined` 后把会话 id 清成空串——
+    于是"问一句 → 被拒答 → 再追问"变成另起一条新会话，上一轮问题不在历史里，
+    指代词再也还原不出来。拒答不等于会话结束，它只是这一轮没有答案。
     """
     return {
         "question": question,
         "refused": True,
         "reason": reason,
+        "conversation_id": conversation_id,
         "retrieval": outcome.to_public(),
         # 被闸门拦下的片段：用户可能一眼就看出"我要的就是这份文件"
         "rejected_candidates": [c.to_public(with_content=True) for c in outcome.rejected],
@@ -401,16 +400,34 @@ def _run_pipeline(question: str, *, user, conversation_id: str | None,
                   recorder: WorkflowRecorder, started: float) -> dict:
     # ---------- ② retrieval ----------
     with recorder.node(NODE_RETRIEVAL) as node:
-        outcome = retrieve(question, top_k=top_k, document_ids=scope_document_ids)
+        # R3：先用一次模型调用把"追问/同义说法"改写成检索得动的查询。
+        # 放在 retrieval 节点内而不是 intent：它服务的是召回，不参与事项分类；
+        # 而且改写失败时这里是**可回退**的（用原话照样检索），
+        # 若塞进 intent，节点失败会让整条链路按"意图识别失败"处理，属于错判。
+        rewritten = rewrite.rewrite_query(question, history)
+        node.model_calls = 1 if rewritten.attempted else 0
+
+        outcome = retrieve(
+            question, top_k=top_k, document_ids=scope_document_ids,
+            standalone_query=rewritten.query, expanded_terms=rewritten.expanded_terms,
+        )
         node.summary = (
             f"命中 {outcome.total_hits} 条，过闸 {len(outcome.candidates)} 条"
             f"（阈值 {outcome.min_coverage:.2f}）"
         )
+        if rewritten.applied:
+            node.summary += "；已改写查询"
         node.detail = {
             "total_hits": outcome.total_hits,
             "passed": len(outcome.candidates),
             "top_coverage": outcome.top_coverage,
             "mode": outcome.mode,
+            # 双路召回各召回多少条：评审问"改写到底有没有用"时看这三个数
+            "recall_paths": outcome.recall_paths,
+            # 需求书要求的轨迹字段：自包含查询与扩展词
+            "standalone_query": outcome.standalone_query,
+            "expanded_terms": list(outcome.expanded_terms),
+            "rewrite": rewritten.to_public(),
         }
         if outcome.injection_suspected:
             node.detail["injection_suspected"] = outcome.injection_suspected
@@ -422,7 +439,8 @@ def _run_pipeline(question: str, *, user, conversation_id: str | None,
         recorder.skip(NODE_VALIDATION, "没有答案可校验")
         raise InsufficientEvidence(
             outcome.refuse_reason,
-            payload=_refusal_payload(question, outcome, outcome.refuse_reason or "证据不足"),
+            payload=_refusal_payload(question, outcome, outcome.refuse_reason or "证据不足",
+                                     conversation_id),
         )
 
     # 未配置模型：不是错误，是既定降级路径。链路照跑，只是不给归纳后的答案。
@@ -443,7 +461,9 @@ def _run_pipeline(question: str, *, user, conversation_id: str | None,
         payload["workflow"] = serialize_run(run)
         raise DegradedMode(payload=payload)
 
-    # ---------- ③ analysis（唯一调模型的节点） ----------
+    # ---------- ③ analysis（生成答案的那次模型调用） ----------
+    # 注意 R3 之后 retrieval 节点里也有一次模型调用（查询改写），
+    # 所以"这次问答调了几次模型"不再等于 1——`model_calls` 要按节点各记各的。
     with recorder.node(NODE_ANALYSIS) as node:
         parsed, result = llm.chat_json(
             SYSTEM_PROMPT, build_user_prompt(question, outcome.candidates, history)
@@ -503,7 +523,7 @@ def _run_pipeline(question: str, *, user, conversation_id: str | None,
         if rejected:
             reason += f"（另有 {len(rejected)} 处引用编号越界）"
         raise InsufficientEvidence(
-            reason, payload=_refusal_payload(question, outcome, reason)
+            reason, payload=_refusal_payload(question, outcome, reason, conversation_id)
         )
 
     if problem == "no_citation":

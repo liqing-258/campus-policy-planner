@@ -29,6 +29,28 @@ def answer_payload(answer: str, cited: list, *, sufficient: bool = True) -> str:
     )
 
 
+def _stub_json(cited: list) -> str:
+    """一次性回给"改写"和"作答"两个不同的 Prompt。
+
+    R3 之后 retrieval 节点会先问一次改写模型（要 `standalone_query` 形状），
+    analysis 才问作答（要 `answer/cited` 形状）。用同一个 payload 喂两处，
+    必有一处因形状不符而报错——所以这里按 Prompt 特征分流。
+    改写那一路返回"原样保留 + 无扩展词"，让召回行为与 R2 一致。
+    """
+    import json
+
+    def _payload(system: str) -> str:
+        if "查询改写" in system:
+            return json.dumps(
+                {"standalone_query": "申请国家励志奖学金需要提交哪些材料？",
+                 "expanded_terms": []},
+                ensure_ascii=False,
+            )
+        return answer_payload("需要提交申请表 [1]。", cited)
+
+    return _payload
+
+
 def ask(client, headers, question: str = "申请国家励志奖学金需要提交哪些材料？", **extra):
     payload = {"question": question, **extra}
     return client.post("/api/v1/qa/ask", headers=headers, json=payload)
@@ -69,18 +91,49 @@ def test_successful_ask_records_four_executed_nodes(app, client, student_headers
 
 def test_only_analysis_node_calls_the_model(app, client, student_headers,
                                             seeded_policy, llm_on, mock_llm):
-    """六个节点里只有一个调模型——这是设计 §7.6 的硬边界，也决定了延迟构成。"""
+    """模型调用只发生在 retrieval（改写）与 analysis（作答）两处，且各一次。
+
+    **R3 把这条边界从"只有 analysis"放宽到"只有这两处"**：答案开头是 `_stub_json`
+    的改写 JSON，说明 retrieval 的那次调用确实是改写，不是别的东西偷偷调的。
+    延迟构成因此变了——retrieval 不再是纯本地计算，设计 §7.6 已同步。
+    意图节点仍必须是零调用（它是纯规则的）,这里一并钉住。
+    """
     llm_on()
-    mock_llm(answer_payload("需要提交申请表 [1]。", [1]))
+    mock_llm(_stub_json([1]))
 
     workflow = ask(client, student_headers).get_json()["data"]["workflow"]
     nodes = nodes_of(workflow)
     assert nodes["analysis"]["model_calls"] == 1
     assert nodes["intent"]["model_calls"] == 0
-    assert nodes["retrieval"]["model_calls"] == 0
-    assert workflow["model_calls"] == 1
+    assert nodes["retrieval"]["model_calls"] == 1
+    assert workflow["model_calls"] == 2
     # 意图节点是规则式的，耗时不该有第二名——真调了模型这里会明显变大
     assert nodes["intent"]["ms"] < 50
+    # 改写的产物要能从轨迹里读到（这是排查"追问为什么还是答不出来"的唯一入口）
+    assert nodes["retrieval"]["detail"]["rewrite"]["applied"] is True
+    assert nodes["retrieval"]["detail"]["standalone_query"]
+
+
+def test_retrieval_records_no_call_when_rewrite_fails(app, client, student_headers,
+                                                      seeded_policy, llm_on, mock_llm):
+    """改写失败不增加 model_calls 的"成功"含义，但仍要能看出试过一次。"""
+
+    def _payload(system: str) -> str:
+        # 只让改写那一路坏掉，作答照常——否则整条链路 4002，验不到"检索层降级"
+        if "查询改写" in system:
+            return "这不是 JSON"
+        return answer_payload("需要提交申请表 [1]。", [1])
+
+    llm_on()
+    mock_llm(_payload)  # 改写重试耗尽后回退原查询；作答正常返回
+
+    body = ask(client, student_headers).get_json()
+    assert body["code"] == 0, body
+    node = nodes_of(body["data"]["workflow"])["retrieval"]
+    assert node["detail"]["rewrite"]["applied"] is False
+    assert node["detail"]["rewrite"]["attempted"] is True
+    assert node["detail"]["standalone_query"] == "申请国家励志奖学金需要提交哪些材料？"
+    assert "已改写查询" not in node["summary"]
 
 
 def test_intent_node_output_drives_next_actions(app, client, student_headers,

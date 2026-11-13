@@ -191,11 +191,10 @@ def mock_llm(monkeypatch):
     不调真实模型：这些用例验的是**代码对模型输出的处理**，
     调真模型会让失败原因变成"今天模型措辞变了"，那不是回归。
     """
-    def _mock(content: str, *, latency: int = 12, prompt: int = 120,
+    def _mock(content, *, latency: int = 12, prompt: int = 120,
               completion: int = 60, reasoning: int | None = None):
-        payload = {
+        payload_for = {
             "model": "fake-model",
-            "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
             "usage": {
                 "prompt_tokens": prompt,
                 "completion_tokens": completion,
@@ -209,7 +208,15 @@ def mock_llm(monkeypatch):
             # 记下最后一次实际发出去的 Prompt：多轮上下文的用例要断言它
             messages = body.get("messages") or []
             calls["prompt"] = "\n".join(m.get("content", "") for m in messages)
-            return payload, latency
+            # R3 之后同一次提问会有两次模型调用（改写 → 作答），两处要的 JSON 形状不同。
+            # 传可调用对象即可按 system prompt 分流；传字符串则两次都给同一个答案。
+            text = content
+            if callable(content):
+                system = next((m.get("content", "") for m in messages
+                               if m.get("role") == "system"), "")
+                text = content(system)
+            return {**payload_for,
+                    "choices": [{"message": {"content": text}, "finish_reason": "stop"}]}, latency
 
         monkeypatch.setattr("app.llm._post", _post)
         _mock.calls = calls

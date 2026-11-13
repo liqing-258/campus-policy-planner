@@ -131,7 +131,12 @@ def test_ask_returns_http_200_even_when_refused(app, client, student_headers, se
 # ============================================================ 闸一：覆盖率
 def test_low_coverage_is_refused_without_calling_model(app, client, student_headers, seeded,
                                                        monkeypatch):
-    """主题不相关时不该调模型——既省钱，也让拒答是确定性的。"""
+    """主题不相关时不该调模型作答——既省钱，也让拒答是确定性的。
+
+    R3 之后 retrieval 节点会先发一次**改写**调用，所以这里不能再说"零次 HTTP"。
+    要钉住的是：**作答那次调用没发生**。判据是只见到一次调用——改写被 _boom
+    打断后回退原查询，检索照样跑，闸门照样拦，作答模型压根没被问。
+    """
     configure_llm(app)
     # configure_llm 默认把闸门关掉以便测引用逻辑，这里必须显式打开才验得到本行为
     app.extensions["settings"].rag_min_coverage = 0.6
@@ -139,13 +144,13 @@ def test_low_coverage_is_refused_without_calling_model(app, client, student_head
 
     def _boom(body):
         called["n"] += 1
-        raise AssertionError("覆盖率不足时不应调用模型")
+        raise AssertionError("覆盖率不足时不应再调用作答模型")
 
     monkeypatch.setattr("app.llm._post", _boom)
     resp = ask(client, student_headers, "图书馆的开馆时间是几点？")
     body = resp.get_json()
     assert body["code"] == 4001
-    assert called["n"] == 0
+    assert called["n"] == 1, "只应有 retrieval 的那次改写调用，作答调用必须没发生"
     assert body["data"]["refused"] is True
     assert body["data"]["suggestions"]
 
@@ -366,3 +371,73 @@ def test_conversations_are_scoped_to_current_user(app, client, student_headers,
     admin_list = client.get("/api/v1/conversations", headers=admin_headers).get_json()["data"]
     assert student_list["total"] == 1
     assert admin_list["total"] == 0
+
+# ============================================================ R3：追问的会话连续性
+def _two_way_model():
+    """按 Prompt 分流：改写那一路回 JSON 形状，作答那一路回答案。
+
+    R3 之后同一次提问会问两次模型，用同一个 payload 喂两处必有一处形状不符，
+    于是"想要的行为"会被 4002 掩盖掉——这是写这类用例最容易踩的坑。
+
+    改写的返回值**取自本轮问题本身**（等价于"模型认为不需要改写"），
+    而不是写死一个别的主题。写死会让这两条用例测不到想测的东西：
+    那等于在断言"改写把问题换成另一件事时，闸门仍然按原问题拦"——这本来就不成立，
+    改写跑偏时 A 路召回的片段会照常进池（残余风险见设计 §7.2.4 的边界说明）。
+    """
+
+    def _post(body):
+        system = body["messages"][0]["content"]
+        if "查询改写" in system:
+            question = body["messages"][1]["content"].rsplit("当前问题：", 1)[-1].strip()
+            return fake_payload(json.dumps(
+                {"standalone_query": question, "expanded_terms": []},
+                ensure_ascii=False)), 10
+        return fake_payload(answer_json("需要提交申请表 [1]。", [1])), 10
+
+    return _post
+
+
+def test_refusal_keeps_the_conversation_alive(app, client, student_headers, seeded, monkeypatch):
+    """拒答必须回传 `conversation_id`，否则前端只能把会话清成空串。
+
+    这是"追问答不出来"的第二个成因，而且**是代码造成的，不是检索质量造成的**：
+    问一句 → 这一轮被拒答 → 前端拿不到 id，于是下一句追问另起一条会话，
+    上一轮问题不在历史里，改写再强也还原不出"这个问题/它"指的是什么。
+
+    判据就是一条：拒答响应里带着原来的 id。
+    """
+    settings = app.extensions["settings"]
+    configure_llm(app)
+    monkeypatch.setattr("app.llm._post", _two_way_model())
+
+    first = ask(client, student_headers).get_json()["data"]
+    conversation_id = first["conversation_id"]
+    assert conversation_id
+
+    # 第二轮问一件知识库里没有的事。把闸门抬起来让它真的在检索层被拦下：
+    # configure_llm 为了测引用逻辑把阈值设成 0，那是另一件事。
+    settings.rag_min_coverage = 0.6
+    resp = client.post("/api/v1/qa/ask", headers=student_headers,
+                       json={"question": "学校游泳馆的年卡怎么办？",
+                             "conversation_id": conversation_id})
+    body = resp.get_json()
+    assert body["code"] == 4001
+    assert body["data"]["refused"] is True
+    assert body["data"]["conversation_id"] == conversation_id, (
+        "拒答不等于会话结束：前端要靠这个 id 把下一句追问续在同一个会话里"
+    )
+
+
+def test_refusal_without_a_known_conversation_returns_null(app, client, student_headers,
+                                                           seeded, monkeypatch):
+    """没有上文时不能凭空造一个 id 给前端——`null` 的含义是"本来就没有"，
+    与"有但丢了"必须能区分，否则前端会把 null 当成"清空我正在看的会话"。"""
+    settings = app.extensions["settings"]
+    configure_llm(app)
+    settings.rag_min_coverage = 0.6
+    monkeypatch.setattr("app.llm._post", _two_way_model())
+
+    resp = ask(client, student_headers, "学校游泳馆的年卡怎么办？")
+    body = resp.get_json()
+    assert body["code"] == 4001
+    assert body["data"]["conversation_id"] is None
