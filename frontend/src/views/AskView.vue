@@ -239,11 +239,16 @@ async function ask(text?: string) {
       // 降级没有归纳结论，只有原文片段：写成消息正文，切回来才读得到内容。
       // 只写前两条 + 一句说明：这里存的是"回忆用的摘要"，不是数据源，
       // 整段拼接会把一条消息撑到几 KB（store 里另有裁剪，但没必要先撑大）。
+      //
+      // R6：正文**必须以后端 note 开头**。之前这里只拼片段，于是同一轮降级在
+      // "当前轮"（橙色卡 + note + 4006）与"历史回放"（只说「原文片断」+ 片段）
+      // 看起来是两件事——用户以为是两次结果不一致。note 里现在带"缺哪个变量"，
+      // 存进正文才能在复查历史时看到当时为什么降级。
       const shown = degraded.value.candidates.slice(0, 2)
         .map((c) => `[${c.index}] ${c.document_title}：${(c.content ?? '').slice(0, 160)}`)
         .join('\n\n')
       commitTurn('degraded',
-        shown
+        `${degraded.value.note}\n\n` + shown
           + `\n\n（降级模式共 ${degraded.value.candidates.length} 条原文片段，完整内容见下方列表）`,
         degraded.value.candidates)
       qa.setWorkflowTrace(degraded.value.workflow ?? null)
@@ -659,12 +664,15 @@ onBeforeUnmount(() => {
               </div>
               <section v-else class="turn-bot past">
                 <div class="bot-head">
-                  <span class="kicker">
+                  <span class="kicker" :class="{ warn: m.kind === 'degraded' }">
                     {{ m.kind === 'refusal' ? '未作答：证据不足'
-                      : m.kind === 'degraded' ? '原文片断'
+                      : m.kind === 'degraded' ? '降级模式：未配置模型'
                       : m.kind === 'citation_rejected' ? '已拦下'
                       : m.kind === 'fatal' ? '请求失败' : '解答' }}
                   </span>
+                  <!-- R6：历史轮也要带 4006，否则同一个降级结果在"刚答完"和"回看"
+                       两处长得像两件事：一处是带错误码的告警，一处只是普通原文卡片 -->
+                  <span v-if="m.kind === 'degraded'" class="tag unknown">4006</span>
                   <span class="muted tiny">{{ formatTime(m.timestamp) }}</span>
                 </div>
                 <div v-if="m.kind === 'answer'" class="answer-text" v-html="renderText(m.content)" />

@@ -53,6 +53,27 @@ function logout() {
 
 const pageTitle = computed(() => (route.meta.title as string) || '')
 
+/**
+ * 降级横幅的第二行：缺什么变量 + 找过哪些 .env。
+ *
+ * 存在的意义是让"我明明配过密钥"这种疑问在界面上就能自证：如果列表里
+ * 项目根的 .env 标着"不存在"，那就是 exe 被放在别的目录、路径没对上；
+ * 如果标着"已读到"却仍降级，那才是变量名写错或值为空。
+ * 只用后端给的 set/missing，**前端拿不到也不显示密钥值**。
+ */
+const degradedHint = computed(() => {
+  const cfg = health.value?.llm_config
+  if (!cfg) return ''
+  const parts: string[] = []
+  if (cfg.missing?.length) parts.push(`缺 ${cfg.missing.join('、')}`)
+  const files = cfg.env_files ?? []
+  if (files.length) {
+    const seen = files.map((f) => `${f.path}${f.found ? '（已读到）' : '（不存在）'}`).join('；')
+    parts.push(`已查找 ${seen}`)
+  }
+  return parts.join('；')
+})
+
 /** 登录页不套外壳：套了会出现"顶栏 + 整页登录卡"两层，品牌写两遍 */
 const isPublic = computed(() => Boolean(route.meta.public))
 
@@ -105,6 +126,9 @@ const initials = computed(() => (auth.displayName || '?').slice(0, 1).toUpperCas
     <div v-if="health && health.llm_mode === 'degraded'" class="degraded">
       <strong>降级模式</strong>
       <span>未配置模型密钥：问答只返回检索到的政策原文，不做归纳总结。其余功能不受影响。</span>
+      <!-- 光说"未配置"等于把定位工作丢给用户：配过 key 的人只会觉得系统有 bug。
+           这里把"缺哪个变量、找过哪些 .env"直接摆出来，一眼能看出是不是路径问题。 -->
+      <span v-if="degradedHint" class="degraded-hint">{{ degradedHint }}</span>
     </div>
 
     <header class="topbar">
@@ -195,6 +219,12 @@ const initials = computed(() => (auth.displayName || '?').slice(0, 1).toUpperCas
   border-bottom: 1px solid var(--c-warn-border);
   color: var(--c-unknown);
   font-size: 12.5px;
+}
+
+.degraded-hint {
+  opacity: 0.78;
+  font-size: 11.5px;
+  user-select: text;
 }
 
 .topbar {

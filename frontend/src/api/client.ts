@@ -127,9 +127,25 @@ export interface Health {
   db: string
   llm_mode: 'llm' | 'degraded'
   llm_model: string | null
+  /** 降级的定位信息：缺哪个变量、找过哪些 .env。不含密钥值 */
+  llm_config?: LlmConfig
   embedding_mode: 'vector' | 'bm25_only' | 'disabled'
   document_count: number
   chunk_count: number
+}
+
+export interface LlmEnvFile {
+  path: string
+  found: boolean
+}
+
+export interface LlmConfig {
+  configured: boolean
+  api_key: 'set' | 'missing'
+  model: string
+  base_url: 'set' | 'missing'
+  missing: string[]
+  env_files: LlmEnvFile[]
 }
 
 export interface User {
