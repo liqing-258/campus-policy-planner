@@ -7,8 +7,18 @@
  * 前端不自己数：自己数的话"待办 5 项"和列表里的 6 行迟早对不上。
  *
  * 不含任何建设进度信息（里程碑 / 接口条数 / 测试项数）。那些在仓库文档里。
+ *
+ * ## R9：四个列表改成自动轮播
+ *
+ * 每张卡的列表都套 `AutoScrollList`：内容超出高度就慢慢上下滚，鼠标移进去停住，
+ * 点条目跳到对应页面。要点在"**停下**"——需求写明"鼠标所在的**板块**中的事项
+ * 自动停止滚动"，所以暂停是绑在容器上的，不是绑在单条上的：指针在卡片任意
+ * 位置都会停，这样才能从容点中想看的那一条。
+ *
+ * 一次多取一些：`page_size` 从 4/6 提到 12/14。只有 4 条时高度不够，永远不滚。
  */
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   api,
   type ConversationRow,
@@ -20,6 +30,7 @@ import {
   type TaskStats,
 } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import AutoScrollList from '../components/AutoScrollList.vue'
 import {
   EFFECTIVE_LABEL,
   PLAN_STATUS_LABEL,
@@ -29,6 +40,7 @@ import {
 } from '../utils/format'
 
 const auth = useAuthStore()
+const router = useRouter()
 
 const health = ref<Health | null>(null)
 const tasks = ref<TaskRow[]>([])
@@ -42,10 +54,10 @@ const error = ref('')
 onMounted(async () => {
   const [h, t, c, p, d, s] = await Promise.allSettled([
     api.get<Health>('/health'),
-    api.get<Paged<TaskRow>>('/tasks?page=1&page_size=6'),
-    api.get<Paged<ConversationRow>>('/conversations?page=1&page_size=4'),
-    api.get<Paged<PlanRow>>('/plans?page=1&page_size=4'),
-    api.get<Paged<DocumentRow>>('/documents?page=1&page_size=4'),
+    api.get<Paged<TaskRow>>('/tasks?page=1&page_size=14'),
+    api.get<Paged<ConversationRow>>('/conversations?page=1&page_size=10'),
+    api.get<Paged<PlanRow>>('/plans?page=1&page_size=10'),
+    api.get<Paged<DocumentRow>>('/documents?page=1&page_size=10'),
     api.get<TaskStats>('/tasks/stats'),
   ])
   if (h.status === 'fulfilled') health.value = h.value
@@ -107,6 +119,17 @@ function dueText(task: TaskRow) {
   if (!task.due_at) return '无明确截止'
   return `截止 ${formatDate(task.due_at)}`
 }
+
+/**
+ * 点条目跳到对应页面。
+ *
+ * 这里**不做"跳到那一条"的深链**（`/ask?conv=xxx`）：问答页与计划页都还没有
+ * 接受定位参数，先把参数拼上去只会让用户以为跳错了——落地在列表顶部，
+ * 而他要找的那一条在下面第十行。跳页、由用户自己点开，比伪精确定位诚实。
+ */
+function go(path: string) {
+  void router.push(path)
+}
 </script>
 
 <template>
@@ -151,10 +174,22 @@ function dueText(task: TaskRow) {
       <section class="card">
         <div class="list-head">
           <h3>我的待办</h3>
-          <span class="muted tiny">{{ upcoming.length }} 项在办</span>
+          <span class="muted tiny">
+            {{ upcoming.length }} 项在办<template v-if="upcoming.length > 4"> · 悬停暂停</template>
+          </span>
         </div>
-        <ul v-if="upcoming.length" class="mini-list">
-          <li v-for="task in upcoming" :key="task.id">
+        <AutoScrollList v-if="upcoming.length">
+          <div
+            v-for="task in upcoming"
+            :key="task.id"
+            class="row"
+            role="button"
+            tabindex="0"
+            :title="`去「计划与任务」查看 ${task.title}`"
+            @click="go('/plans')"
+            @keydown.enter="go('/plans')"
+            @keydown.space.prevent="go('/plans')"
+          >
             <span class="tag" :class="task.status === 'doing' ? 'info' : 'plain'">
               {{ TASK_STATUS_LABEL[task.status] ?? task.status }}
             </span>
@@ -166,8 +201,8 @@ function dueText(task: TaskRow) {
               </div>
             </div>
             <span class="tag plain">{{ task.priority }}</span>
-          </li>
-        </ul>
+          </div>
+        </AutoScrollList>
         <p v-else-if="loading" class="empty">读取中…</p>
         <p v-else class="empty">
           名下暂无待办。先做一次「资格匹配」并确认计划，任务会自动生成。
@@ -183,8 +218,18 @@ function dueText(task: TaskRow) {
             {{ health?.document_count ?? 0 }} 份文件 · {{ health?.chunk_count ?? 0 }} 个片段
           </span>
         </div>
-        <ul v-if="documents.length" class="mini-list">
-          <li v-for="doc in documents" :key="doc.id">
+        <AutoScrollList v-if="documents.length">
+          <div
+            v-for="doc in documents"
+            :key="doc.id"
+            class="row"
+            role="button"
+            tabindex="0"
+            :title="`去「政策知识库」查看 ${doc.title}`"
+            @click="go('/library')"
+            @keydown.enter="go('/library')"
+            @keydown.space.prevent="go('/library')"
+          >
             <div class="grow">
               <div class="item-title">{{ doc.title }}</div>
               <div class="muted tiny">
@@ -195,8 +240,8 @@ function dueText(task: TaskRow) {
             <span class="tag" :class="doc.effective_status === 'active' ? 'met' : 'plain'">
               {{ EFFECTIVE_LABEL[doc.effective_status] ?? doc.effective_status }}
             </span>
-          </li>
-        </ul>
+          </div>
+        </AutoScrollList>
         <p v-else class="empty">{{ loading ? '读取中…' : '知识库还没有文件。' }}</p>
         <router-link class="more" to="/library">打开政策库 →</router-link>
       </section>
@@ -207,8 +252,18 @@ function dueText(task: TaskRow) {
           <h3>我的计划</h3>
           <span class="muted tiny">{{ plans.length ? `${plans.length} 份` : '' }}</span>
         </div>
-        <ul v-if="plans.length" class="mini-list">
-          <li v-for="plan in plans" :key="plan.id">
+        <AutoScrollList v-if="plans.length">
+          <div
+            v-for="plan in plans"
+            :key="plan.id"
+            class="row"
+            role="button"
+            tabindex="0"
+            :title="`去「计划与任务」查看 ${plan.title}`"
+            @click="go('/plans')"
+            @keydown.enter="go('/plans')"
+            @keydown.space.prevent="go('/plans')"
+          >
             <span
               class="tag"
               :class="plan.status === 'confirmed' ? 'met' : plan.status === 'draft' ? 'unknown' : 'plain'"
@@ -221,8 +276,8 @@ function dueText(task: TaskRow) {
                 {{ plan.confirmed_at ? `确认于 ${formatTime(plan.confirmed_at)}` : `创建于 ${formatTime(plan.created_at)}` }}
               </div>
             </div>
-          </li>
-        </ul>
+          </div>
+        </AutoScrollList>
         <p v-else class="empty">{{ loading ? '读取中…' : '还没有计划。' }}</p>
         <router-link class="more" to="/plans">去计划与任务 →</router-link>
       </section>
@@ -233,14 +288,25 @@ function dueText(task: TaskRow) {
           <h3>最近提问</h3>
           <span class="muted tiny">{{ conversations.length ? `${conversations.length} 条` : '' }}</span>
         </div>
-        <ul v-if="conversations.length" class="mini-list">
-          <li v-for="conv in conversations" :key="conv.id">
+        <AutoScrollList v-if="conversations.length">
+          <div
+            v-for="conv in conversations"
+            :key="conv.id"
+            class="row"
+            role="button"
+            tabindex="0"
+            :title="`去「智能问答」继续 ${conv.title}`"
+            @click="go('/ask')"
+            @keydown.enter="go('/ask')"
+            @keydown.space.prevent="go('/ask')"
+          >
             <div class="grow">
               <div class="item-title">{{ conv.title }}</div>
               <div class="muted tiny">{{ formatTime(conv.created_at) }}</div>
             </div>
-          </li>
-        </ul>
+            <span class="row-arrow" aria-hidden="true">→</span>
+          </div>
+        </AutoScrollList>
         <p v-else class="empty">{{ loading ? '读取中…' : '还没有提问记录。' }}</p>
         <router-link class="more" to="/ask">去智能问答 →</router-link>
       </section>
@@ -311,5 +377,54 @@ function dueText(task: TaskRow) {
 
 .bar-foot {
   margin: var(--space-3) 0 0;
+}
+
+/* 列表行：原来是 <li>，现在要在自动滚动的容器里既当列表项又当按钮。
+   用 div + role="button"，是因为 <li> 套在 div 里语义就断了，
+   而这里点击行为才是主要的。 */
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  transition: background 0.14s ease, box-shadow 0.14s ease;
+}
+
+.row:hover {
+  background: var(--c-surface-2);
+  /* 左侧 2px 色条：光标在哪一行，靠它比整行变亮更明确 */
+  box-shadow: inset 2px 0 0 var(--c-primary);
+}
+
+.row:active {
+  background: var(--c-surface-3);
+}
+
+/* 行内标题在 hover 时把颜色提亮 + 显示箭头，暗示"可以点" */
+.row .item-title {
+  font-size: 13.5px;
+  line-height: 1.5;
+  transition: color 0.14s ease;
+}
+
+.row:hover .item-title {
+  color: var(--c-primary);
+}
+
+.row-arrow {
+  color: var(--c-dim);
+  font-size: 12px;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+  flex: none;
+  align-self: center;
+}
+
+.row:hover .row-arrow {
+  opacity: 1;
+  transform: none;
 }
 </style>
