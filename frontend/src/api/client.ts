@@ -161,6 +161,116 @@ export interface LoginResult {
   user: User
 }
 
+/** 数字验证码：图是服务端画好的 SVG，前端只负责显示与回传 id */
+export interface Captcha {
+  captcha_id: string
+  /** `data:image/svg+xml;base64,...` */
+  image: string
+  expires_in: number
+  length: number
+}
+
+export interface RegisterPayload {
+  display_name: string
+  student_no: string
+  password?: string
+  captcha_id: string
+  captcha_code: string
+}
+
+export interface RegisterResult extends LoginResult {
+  /** `student_no_suffix` = 没填密码，用了学号后 6 位作初始口令 */
+  password_source: 'custom' | 'student_no_suffix'
+  initial_password: string | null
+}
+
+// ---------- 管理员数据看板（R9）----------
+export interface PortraitItem {
+  session_id: string
+  student: string
+  student_no: string
+  document_title: string
+  document_id: string
+  student_type: string
+  grade: string
+  gpa: string
+  major: string
+  met: number
+  not_met: number
+  unknown: number
+  completeness: number
+  created_at: string | null
+}
+
+export interface PortraitBucket {
+  label: string
+  count: number
+}
+
+export interface PortraitSummary {
+  session_count: number
+  student_count: number
+  document_count: number
+  recent_7d: number
+  met: number
+  not_met: number
+  unknown: number
+  judged: number
+  /** 无数据时为 null，不是 0 —— 0 会被读成"一个都没符合" */
+  met_rate: number | null
+  unknown_rate: number | null
+  avg_completeness: number | null
+  by_student_type: PortraitBucket[]
+  raw_student_types: PortraitBucket[]
+  by_grade: PortraitBucket[]
+  truncated: boolean
+  generated_at: string | null
+}
+
+export interface PortraitsData {
+  summary: PortraitSummary
+  items: PortraitItem[]
+}
+
+export interface QaKeyword {
+  word: string
+  weight: number
+  count: number
+}
+
+export interface QaTopic {
+  key: string
+  label: string
+  count: number
+  share: number
+  examples: string[]
+}
+
+export interface QaHour {
+  hour: number
+  count: number
+}
+
+export interface QaSummary {
+  question_count: number
+  asker_count: number
+  conversation_count: number
+  keyword_count: number
+  peak_hour: number | null
+  truncated: boolean
+  generated_at: string | null
+}
+
+export interface QaData {
+  summary: QaSummary
+  keywords: QaKeyword[]
+  topics: QaTopic[]
+  hours: QaHour[]
+  /** 后端统一用 label/count，提问人数那一栏的"名字"也塞在 label 里 */
+  weekdays: PortraitBucket[]
+  top_askers: PortraitBucket[]
+}
+
 export interface Paged<T> {
   items: T[]
   page: number
