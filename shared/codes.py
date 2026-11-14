@@ -13,6 +13,7 @@ INVALID_PAGINATION = 1002    # 400 分页参数非法
 SCHEMA_INVALID = 1003        # 422 结构校验失败
 FILE_TOO_LARGE = 1004        # 413 文件超限
 FILE_TYPE_UNSUPPORTED = 1005  # 415 类型不支持
+CAPTCHA_INVALID = 1006       # 400 数字验证码错误或已过期
 
 DOCUMENT_DUPLICATED = 2001   # 409 文档已存在
 DOCUMENT_NOT_FOUND = 2002    # 404 文档不存在
@@ -23,6 +24,7 @@ DEPENDENCY_CYCLE = 2006      # 409 任务依赖成环
 PARSE_IN_PROGRESS = 2007     # 409 解析进行中
 RULES_NOT_READY = 2008       # 200 没有已复核规则，无法匹配（业务态）
 MESSAGE_NOT_FOUND = 2009     # 404 消息或工作流记录不存在
+USER_DUPLICATED = 2010       # 409 学号已被注册
 
 UNAUTHENTICATED = 3001       # 401 未登录或令牌过期
 FORBIDDEN = 3002             # 403 无权限
@@ -51,6 +53,7 @@ CODE_HTTP: dict[int, int] = {
     SCHEMA_INVALID: 422,
     FILE_TOO_LARGE: 413,
     FILE_TYPE_UNSUPPORTED: 415,
+    CAPTCHA_INVALID: 400,
     DOCUMENT_DUPLICATED: 409,
     DOCUMENT_NOT_FOUND: 404,
     RULE_NOT_FOUND: 404,
@@ -60,6 +63,7 @@ CODE_HTTP: dict[int, int] = {
     PARSE_IN_PROGRESS: 409,
     RULES_NOT_READY: 200,
     MESSAGE_NOT_FOUND: 404,
+    USER_DUPLICATED: 409,
     UNAUTHENTICATED: 401,
     FORBIDDEN: 403,
     INSUFFICIENT_EVIDENCE: 200,
@@ -80,6 +84,7 @@ CODE_MESSAGES: dict[int, str] = {
     SCHEMA_INVALID: "请求体结构校验失败",
     FILE_TOO_LARGE: "文件超过大小限制",
     FILE_TYPE_UNSUPPORTED: "文件类型不支持",
+    CAPTCHA_INVALID: "验证码不正确或已过期，请点击图片刷新",
     DOCUMENT_DUPLICATED: "文档已存在",
     DOCUMENT_NOT_FOUND: "文档不存在",
     RULE_NOT_FOUND: "规则不存在",
@@ -89,6 +94,7 @@ CODE_MESSAGES: dict[int, str] = {
     PARSE_IN_PROGRESS: "解析进行中，请稍后再试",
     RULES_NOT_READY: "该文件还没有已复核的规则，无法匹配；请管理员先抽取并复核规则",
     MESSAGE_NOT_FOUND: "消息或工作流记录不存在",
+    USER_DUPLICATED: "该学号已注册，请直接登录",
     UNAUTHENTICATED: "未登录或登录已过期",
     FORBIDDEN: "没有权限执行该操作",
     INSUFFICIENT_EVIDENCE: "未在政策库中找到足够依据，无法给出可靠回答",

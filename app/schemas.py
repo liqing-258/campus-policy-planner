@@ -31,6 +31,38 @@ class LoginRequest(StrictModel):
     password: str = Field(min_length=1, max_length=72)
 
 
+class RegisterRequest(StrictModel):
+    """学生自助注册。
+
+    字段与界面上那几栏一一对应：**学生姓名 / 学号 / 数字验证码**，外加一个可选密码。
+    为什么密码可选：需求只提了三栏，但登录必须有密码，所以留空时用「学号后 6 位」
+    作初始口令，并在响应里明确告诉调用方用了哪条规则——悄悄给用户一个他自己
+    不知道的密码，比让他多填一栏更糟。
+    """
+
+    display_name: str = Field(min_length=2, max_length=20)
+    student_no: str = Field(min_length=4, max_length=20, pattern=r"^[0-9A-Za-z]+$")
+    password: str | None = Field(default=None, max_length=72)
+    captcha_id: str = Field(min_length=8, max_length=64)
+    captcha_code: str = Field(min_length=4, max_length=4, pattern=r"^\d{4}$")
+
+    @field_validator("display_name")
+    @classmethod
+    def _name_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("姓名不能为空")
+        return value
+
+    @field_validator("password")
+    @classmethod
+    def _password_strength(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return None
+        if len(value) < 6:
+            raise ValueError("密码至少 6 位")
+        return value
+
+
 def validate(schema: type[StrictModel], payload: dict) -> BaseModel:
     """统一把 pydantic 的 ValidationError 翻译成 1001，并给出可读字段名。"""
     try:

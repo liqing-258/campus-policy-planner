@@ -54,6 +54,22 @@ class InvalidParam(ApiError):
     code = codes.INVALID_PARAM
 
 
+class CaptchaInvalid(ApiError):
+    """数字验证码错误或过期。
+
+    与 `InvalidParam` 分开，是因为前端要据此**换一张图**——参数格式错只需提示，
+    验证码错必须让用户重看新码（服务端一码一用，失败即销毁）。
+    """
+
+    code = codes.CAPTCHA_INVALID
+
+
+class UserDuplicated(ApiError):
+    """学号重复。比 `DocumentDuplicated` 多一个用途：注册页要把链接改成"去登录"。"""
+
+    code = codes.USER_DUPLICATED
+
+
 class InvalidPagination(ApiError):
     code = codes.INVALID_PAGINATION
 
