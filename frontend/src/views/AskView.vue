@@ -1270,7 +1270,7 @@ onBeforeUnmount(() => {
   width: 46px;
   height: 46px;
   border-radius: 14px;
-  background: var(--c-primary);
+  background: var(--grad-brand);
   color: #fff;
   font-size: 22px;
   font-weight: 700;
@@ -1307,7 +1307,7 @@ onBeforeUnmount(() => {
   max-width: 78%;
   padding: 10px 14px;
   border-radius: 14px 14px 4px 14px;
-  background: var(--c-primary);
+  background: var(--c-primary-strong);
   color: #fff;
 }
 
@@ -1898,9 +1898,9 @@ onBeforeUnmount(() => {
   flex: none;
   min-height: 34px;
   padding: 0 18px;
-  border: 1px solid var(--c-primary);
+  border: 1px solid var(--c-primary-strong);
   border-radius: 12px;
-  background: var(--c-primary);
+  background: var(--c-primary-strong);
   color: #fff;
   font-family: inherit;
   font-size: 13.5px;
@@ -1910,7 +1910,8 @@ onBeforeUnmount(() => {
 }
 
 .send:hover:not(:disabled) {
-  background: #3b6fd4;
+  background: var(--c-primary-hover);
+  border-color: var(--c-primary-hover);
 }
 
 .send:disabled {
