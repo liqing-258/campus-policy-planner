@@ -48,6 +48,7 @@ def create_app(overrides: dict | None = None) -> Flask:
     init_contract(app)
 
     # ---- 蓝图 ----
+    from app import analytics as analytics_mod
     from app import auth as auth_mod
     from app import documents as documents_mod
     from app import health as health_mod
@@ -67,6 +68,8 @@ def create_app(overrides: dict | None = None) -> Flask:
     app.register_blueprint(plans_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(tasks_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(workflows_mod.bp, url_prefix=API_PREFIX)
+    # 管理看板独立一个蓝图：它是只读聚合，与 workflows 的写入路径没有关系
+    app.register_blueprint(analytics_mod.bp, url_prefix=API_PREFIX)
 
     _register_root_route(app)
 
