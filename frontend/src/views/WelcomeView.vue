@@ -170,7 +170,11 @@ function onMaskClick(event: MouseEvent) {
   font-size: 12px;
   letter-spacing: 5px;
   text-indent: 5px;
-  color: var(--c-dim);
+  /* 不能用 --c-dim：R11 起页面背景是渐变，eyebrow 正落在顶部光晕的
+     合成底上，dim 实测只剩 4.49:1（差 0.01 达标）。全站 dim 文字里
+     只有这一处直接坐在渐变上，其余都在卡片/侧栏的白底里。
+     用 --c-text-2 实测 4.98:1，语义上也更对——眉题是"次级文字"不是"弱化文字" */
+  color: var(--c-text-2);
   text-transform: uppercase;
 }
 

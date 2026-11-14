@@ -81,11 +81,21 @@
   --shadow-card: 0 1px 2px rgba(18, 48, 43, 0.05), 0 6px 18px rgba(18, 48, 43, 0.06);
   --shadow-pop: 0 12px 32px rgba(18, 48, 43, 0.16), 0 2px 6px rgba(18, 48, 43, 0.08);
 
-  /* 页面底色的一层极淡光晕：浅底上不要用大面积饱和色，
-     两处低透明度径向渐变只负责"视线往中间收"，不做装饰 */
+  /* 页面底色的分层渐变（R11）：浅底上大面积饱和色会显脏，
+     所以拆成「一层极浅的斜向底纹 + 三处低透明度光晕」：
+     linear 层负责让背景不再是单一平色（顶/中/底三个停靠点渐进），
+     radial 层只负责"视线往中间收"。
+     最深停靠点 #edf5f2 是实算出来的下限：再深一档（#ecf4f1）dim 文字
+     只剩 4.51、#eaf2ee 直接跌破 4.5（dim 4.43 / primary 4.41）。
+     改这组色前先跑对比度试算，别只看截图。
+     附加规矩（R11 实测）：光晕叠上 linear 层后的**合成底**会比停靠点更深，
+     dim 文字直接坐在渐变上时不足 4.5（欢迎页 eyebrow 实测 4.49）——
+     所以 dim 不许用在渐变底上，坐底的次级文字一律 --c-text-2（实测 4.98）。 */
   --grad-page:
-    radial-gradient(900px 420px at 12% -8%, rgba(10, 125, 111, 0.07), transparent 62%),
-    radial-gradient(760px 380px at 92% 4%, rgba(156, 100, 16, 0.045), transparent 60%);
+    radial-gradient(1200px 560px at 8% -6%, rgba(10, 125, 111, 0.08), transparent 60%),
+    radial-gradient(1000px 480px at 100% 2%, rgba(18, 168, 146, 0.07), transparent 62%),
+    radial-gradient(1500px 680px at 50% 118%, rgba(7, 107, 94, 0.06), transparent 66%),
+    linear-gradient(172deg, #edf5f2 0%, #f4f8f7 46%, #eef5f2 100%);
   --grad-brand: linear-gradient(135deg, #12a892 0%, #076b5e 78%);
 }
 
