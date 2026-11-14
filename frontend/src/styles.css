@@ -1,40 +1,53 @@
 /* ============================================================
    设计令牌 —— 全局唯一来源
-   取色参照已部署的「智能教室设备管控系统」（120.27.211.217），
-   保证两个课程项目在观感上属于同一套作品：
-   深色底 + 蓝色主色 + 低饱和面板，信息密度高、长时间看不累。
+   R9 换肤：从「深蓝 + 靛蓝主色」改为「墨青底 + 青碧主色 + 暖砂点缀」。
+   换肤只改这一处；组件内一律写 var(--…)，不许写死色值（R9 已全仓扫过一遍）。
 
-   规则：组件内只允许写 var(--…)，不允许写死色值。
-   换主题时只改这一处。
+   为什么是三色而不是两色：青碧负责"可点击、可聚焦"，暖砂负责"数字与强调"。
+   两者都往冷色靠会让界面变成一片蓝绿、层级全靠亮度差；
+   而状态色（符合/不符合/无法判定）必须留给语义，不参与品牌表达。
+
+   对比度按 WCAG AA 校过：
+   - 正文 --c-text 于 --c-bg ≈ 15:1
+   - 次级文字 --c-text-2 ≈ 6.4:1
+   - 按钮白字于 --c-primary-strong ≈ 4.9:1
+   --c-primary（亮青碧）只用于**文字/描边/进度条**，不铺大面积底色 ——
+   亮色底配白字读不清，配深字又显得脏，这是旧版 .btn 直接用 primary 遗留的问题。
    ============================================================ */
 :root {
-  --c-bg: #0f1115;
-  --c-surface: #171b24;
-  --c-surface-2: #1c212c;
-  --c-border: #262c38;
-  --c-border-strong: #333b4a;
+  --c-bg: #08110f;
+  --c-surface: #0e1a18;
+  --c-surface-2: #132320;
+  --c-surface-3: #19302c;
+  --c-border: #1d3532;
+  --c-border-strong: #2a4a45;
 
-  --c-text: #e6e9ef;
-  --c-text-2: #98a2b3;
-  --c-dim: #6b7484;
+  --c-text: #e7f1ee;
+  --c-text-2: #90a8a3;
+  --c-dim: #647d78;
 
-  --c-primary: #4c8dff;
-  --c-primary-weak: rgba(76, 141, 255, 0.14);
-  --c-primary-border: rgba(76, 141, 255, 0.45);
+  --c-primary: #2fc7b4;
+  --c-primary-strong: #0b7f74;
+  --c-primary-hover: #0e9488;
+  --c-primary-weak: rgba(47, 199, 180, 0.12);
+  --c-primary-border: rgba(47, 199, 180, 0.4);
 
-  --c-met: #22c55e;
-  --c-met-bg: rgba(34, 197, 94, 0.12);
-  --c-met-border: rgba(34, 197, 94, 0.4);
+  --c-accent: #e9c46a;
+  --c-accent-weak: rgba(233, 196, 106, 0.14);
 
-  --c-not-met: #ef4444;
-  --c-not-met-bg: rgba(239, 68, 68, 0.12);
-  --c-not-met-border: rgba(239, 68, 68, 0.4);
+  --c-met: #4ad98a;
+  --c-met-bg: rgba(74, 217, 138, 0.12);
+  --c-met-border: rgba(74, 217, 138, 0.38);
 
-  --c-unknown: #f59e0b;
-  --c-warn-bg: rgba(245, 158, 11, 0.12);
-  --c-warn-border: rgba(245, 158, 11, 0.38);
+  --c-not-met: #f26d7d;
+  --c-not-met-bg: rgba(242, 109, 125, 0.12);
+  --c-not-met-border: rgba(242, 109, 125, 0.4);
 
-  --c-info: #38bdf8;
+  --c-unknown: #e8b44a;
+  --c-warn-bg: rgba(232, 180, 74, 0.12);
+  --c-warn-border: rgba(232, 180, 74, 0.38);
+
+  --c-info: #6fb6e8;
   --c-purple: #a78bfa;
 
   --space-1: 4px;
@@ -44,9 +57,17 @@
   --space-6: 24px;
   --space-8: 32px;
 
-  --radius-card: 12px;
-  --radius-control: 8px;
-  --shadow-card: 0 6px 24px rgba(0, 0, 0, 0.35);
+  --radius-card: 14px;
+  --radius-control: 9px;
+  --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.34);
+  --shadow-pop: 0 18px 48px rgba(0, 0, 0, 0.5);
+
+  /* 页面底色的一层极淡光晕：纯色底在 27 寸屏上会显得"糊成一块"，
+     两处径向渐变足够把视线从边角拉回中间，又不会被误认为加载态 */
+  --grad-page:
+    radial-gradient(900px 420px at 12% -8%, rgba(47, 199, 180, 0.10), transparent 62%),
+    radial-gradient(760px 380px at 92% 4%, rgba(233, 196, 106, 0.06), transparent 60%);
+  --grad-brand: linear-gradient(135deg, #2fc7b4 0%, #0b7f74 72%);
 }
 
 * {
@@ -62,11 +83,19 @@ body,
 
 body {
   background: var(--c-bg);
+  background-image: var(--grad-page);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
   color: var(--c-text);
   font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
   font-size: 14px;
   line-height: 1.7;
   -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--c-primary-weak);
+  color: var(--c-text);
 }
 
 h1,
@@ -90,6 +119,14 @@ h3 {
 a {
   color: var(--c-primary);
   text-decoration: none;
+}
+
+/* 键盘可达性：鼠标点不显示，Tab 走才显示。旧版靠 :focus 的 box-shadow，
+   在深色底上几乎看不见，这里补一个真正能看见的环。 */
+:focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 /* ---------- 文本 ---------- */
@@ -182,6 +219,8 @@ a {
   border-radius: var(--radius-card);
   padding: var(--space-4) var(--space-4);
   min-width: 0;
+  /* 内高光一条：纯描边的卡片在深色底上像"贴上去的"，这道 1px 亮线把它压进背景 */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .card > h3 {
@@ -233,6 +272,33 @@ a {
   border: 1px solid var(--c-border);
   border-radius: var(--radius-card);
   min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 左侧 2px 色条：四个并列指标里"哪个是重点"靠它区分，比给整块上底色克制 */
+.stat::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--c-border-strong);
+}
+
+.stat.accent::before {
+  background: var(--c-primary);
+}
+.stat.ok::before {
+  background: var(--c-met);
+}
+.stat.warn::before {
+  background: var(--c-unknown);
+}
+.stat.danger::before {
+  background: var(--c-not-met);
+}
+.stat.info::before {
+  background: var(--c-info);
 }
 
 .stat .k {
@@ -245,6 +311,7 @@ a {
   font-weight: 650;
   line-height: 1.25;
   font-variant-numeric: tabular-nums;
+  color: var(--c-accent);
 }
 
 .stat .v small {
@@ -345,8 +412,8 @@ a {
 
 .tag.info {
   color: var(--c-info);
-  background: rgba(56, 189, 248, 0.12);
-  border-color: rgba(56, 189, 248, 0.38);
+  background: rgba(111, 182, 232, 0.12);
+  border-color: rgba(111, 182, 232, 0.38);
 }
 
 /* ---------- 按钮 ---------- */
@@ -357,20 +424,28 @@ a {
   gap: var(--space-2);
   min-height: 36px;
   padding: 0 var(--space-4);
-  border: 1px solid var(--c-primary);
+  border: 1px solid var(--c-primary-strong);
   border-radius: var(--radius-control);
-  background: var(--c-primary);
+  background: var(--c-primary-strong);
   color: #fff;
   font-size: 13.5px;
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease,
+    transform 0.16s ease, box-shadow 0.16s ease;
 }
 
 .btn:hover:not(:disabled) {
-  background: #3b6fd4;
-  border-color: #3b6fd4;
+  background: var(--c-primary-hover);
+  border-color: var(--c-primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(11, 127, 116, 0.32);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .btn:disabled {
@@ -386,8 +461,9 @@ a {
 
 .btn-ghost:hover:not(:disabled) {
   background: var(--c-surface);
-  border-color: var(--c-primary);
+  border-color: var(--c-primary-border);
   color: var(--c-primary);
+  box-shadow: none;
 }
 
 .btn-sm {
@@ -405,6 +481,7 @@ a {
 .btn-danger:hover:not(:disabled) {
   background: var(--c-not-met-bg);
   border-color: var(--c-not-met);
+  box-shadow: none;
 }
 
 .link {
@@ -454,6 +531,7 @@ textarea {
   font-size: 13.5px;
   font-family: inherit;
   outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
 
 textarea {
@@ -511,7 +589,7 @@ table tbody tr:last-child td {
 }
 
 .table tbody tr:hover td {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.025);
 }
 
 /* ---------- 列表 ---------- */
@@ -655,7 +733,25 @@ table tbody tr:last-child td {
 ::-webkit-scrollbar-thumb {
   background: var(--c-border-strong);
   border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--c-primary-border);
+  background-clip: content-box;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* ---------- 动效总闸 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

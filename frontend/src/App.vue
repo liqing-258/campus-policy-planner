@@ -14,6 +14,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api, setUnauthorizedHandler, type Health } from './api/client'
 import { useAuthStore } from './stores/auth'
 import { useQAStore } from './stores/qa'
+import BubbleFx from './components/BubbleFx.vue'
 
 const auth = useAuthStore()
 const qa = useQAStore()
@@ -103,7 +104,11 @@ const navGroups = computed(() => {
   if (auth.isAdmin) {
     groups.push({
       title: '系统管理',
-      items: [{ to: '/rules', label: '规则管理', icon: '⚙' }],
+      items: [
+        // 数据中心排在规则管理之前：它是管理员每天都在看的，规则管理是偶尔改一次
+        { to: '/admin', label: '数据中心', icon: '◱' },
+        { to: '/rules', label: '规则管理', icon: '⚙' },
+      ],
     })
   }
   return groups
@@ -118,7 +123,11 @@ const initials = computed(() => (auth.displayName || '?').slice(0, 1).toUpperCas
 </script>
 
 <template>
-  <!-- 公共路由（登录页）独立成页，不套应用外壳 -->
+  <!-- 气泡光标与点击破裂：挂在最外层，公共页与内页都有。
+       组件内部自己判断 reduced-motion 与触屏，不启用时它连 canvas 都不创建 -->
+  <BubbleFx />
+
+  <!-- 公共路由（落地页 / 登录页）独立成页，不套应用外壳 -->
   <router-view v-if="isPublic" />
 
   <div v-else class="app">
@@ -251,7 +260,9 @@ const initials = computed(() => (auth.displayName || '?').slice(0, 1).toUpperCas
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  background: var(--c-primary);
+  /* 品牌渐变而非纯 primary：白字压在 #2fc7b4 上只有 2.1:1，
+     压到渐变深端就够 4.5:1 了 */
+  background: var(--grad-brand);
   color: #fff;
   font-weight: 700;
   font-size: 15px;
@@ -389,10 +400,13 @@ nav {
 }
 
 .nav-item.on {
-  background: var(--c-primary);
-  border-color: var(--c-primary);
+  /* 用 brand 渐变 + strong 底色：亮青碧铺底配白字只有 2.1:1，读不清。
+     左侧那道 2px 亮线是"当前位置"的第二重信号，不依赖颜色深浅 */
+  background: linear-gradient(90deg, var(--c-primary-strong), rgba(11, 127, 116, 0.55));
+  border-color: var(--c-primary-strong);
   color: #fff;
   font-weight: 500;
+  box-shadow: inset 2px 0 0 var(--c-primary);
 }
 
 .nav-icon {
