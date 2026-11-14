@@ -39,6 +39,9 @@ def health():
         "db": db_status,
         "llm_mode": settings.llm_mode,
         "llm_model": settings.llm_model or None,
+        # 降级时最需要的不是"降级了"，而是"缺什么、找过哪里"。
+        # 只回路径与 set/missing，不回密钥值（详见 config.Settings.llm_config）。
+        "llm_config": settings.llm_config,
         "embedding_mode": settings.embedding_mode,
         "document_count": document_count,
         "chunk_count": chunk_count,

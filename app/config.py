@@ -61,15 +61,59 @@ def _abs_path(raw: str) -> Path:
     return path if path.is_absolute() else (PROJECT_ROOT / path).resolve()
 
 
+def env_candidates() -> list[Path]:
+    """按优先级列出可能放 `.env` 的位置（去重、保序）。
+
+    为什么不只找 `PROJECT_ROOT`：打包后 `writable_root()` 是 **exe 所在目录**
+    （`dist/`），而密钥通常留在项目根的 `.env` 里。只在 exe 目录找，就会
+    "明明配了密钥却报降级"——R6 现场就是这么误判成"密钥丢了"的。
+
+    为什么不一路上溯：exe 被单独拷到别的目录时，上溯可能命中无关的 `.env`。
+    这里加了一道硬条件——**上一级必须确实是本项目的开发根**（有 `server.py`），
+    否则不读。源码运行时 PROJECT_ROOT 就是项目根，上一级是它的父目录，
+    通常没有 `server.py`，自然不参与。
+    """
+    candidates: list[Path] = [PROJECT_ROOT / ".env"]
+    parent = PROJECT_ROOT.parent
+    if parent != PROJECT_ROOT and (parent / "server.py").is_file():
+        candidates.append(parent / ".env")
+    if RESOURCE_ROOT not in (PROJECT_ROOT, parent):
+        candidates.append(RESOURCE_ROOT / ".env")
+
+    ordered: list[Path] = []
+    seen: set[str] = set()
+    for path in candidates:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            ordered.append(path)
+    return ordered
+
+
+def load_env_sources() -> list[dict]:
+    """逐个尝试候选 `.env`，返回"找过哪些、命中哪些"。
+
+    记录本身就是可诊断性的一部分：`/health` 把它回给前端，用户看到横幅上
+    写着"已查找 A / B，均不存在"，就知道该把 `.env` 放到哪个路径，
+    不必再靠猜。**不记录任何值**，只记路径与是否存在。
+    """
+    sources: list[dict] = []
+    for path in env_candidates():
+        found = path.is_file()
+        if found:
+            # override=False：进程环境变量优先，与既有约定一致
+            load_dotenv(path, override=False)
+        sources.append({"path": str(path), "found": found})
+    return sources
+
+
 class Settings:
     """一次实例化的运行时配置。测试可用 overrides 覆盖任意字段。"""
 
     def __init__(self, overrides: dict | None = None) -> None:
         # 只在首次构造时加载 .env；已存在的进程环境变量优先级更高（load_dotenv 默认不覆盖）。
-        # 两个位置都看：exe 同级（用户自己放，便于换密钥）优先，其次打包内资源目录。
-        load_dotenv(PROJECT_ROOT / ".env", override=False)
-        if RESOURCE_ROOT != PROJECT_ROOT:
-            load_dotenv(RESOURCE_ROOT / ".env", override=False)
+        # 顺序见 env_candidates()：exe 同级 → 项目根（仅当确属本项目）→ 打包内资源目录。
+        self.env_sources = load_env_sources()
 
         self.app_env = _str("APP_ENV", "dev")
         self.log_level = _str("LOG_LEVEL", "INFO").upper()
@@ -205,6 +249,31 @@ class Settings:
     @property
     def llm_mode(self) -> str:
         return "llm" if self.llm_configured else "degraded"
+
+    @property
+    def llm_missing(self) -> list[str]:
+        """缺哪几个变量才降级——只列名字，用户拿去对照自己的 .env。"""
+        missing: list[str] = []
+        if not self.llm_api_key:
+            missing.append("LLM_API_KEY")
+        if not self.llm_model:
+            missing.append("LLM_MODEL")
+        return missing
+
+    @property
+    def llm_config(self) -> dict:
+        """给 `/health` 的配置诊断：说清"缺什么、找过哪里"，永不回传密钥值。
+
+        `api_key` 只输出 `set` / `missing`，长度也不给——长度能被用来验证猜测。
+        """
+        return {
+            "configured": self.llm_configured,
+            "api_key": "set" if self.llm_api_key else "missing",
+            "model": self.llm_model or "missing",
+            "base_url": "set" if self.llm_base_url else "missing",
+            "missing": self.llm_missing,
+            "env_files": self.env_sources,
+        }
 
     @property
     def embedding_mode(self) -> str:

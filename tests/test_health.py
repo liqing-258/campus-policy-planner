@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import os
+
 
 def test_health_returns_200_and_ok(client):
     resp = client.get("/api/v1/health")
@@ -24,10 +26,26 @@ def test_health_reports_degraded_mode_without_api_key(client):
 
 
 def test_health_never_leaks_secrets(client):
-    """健康检查是公开接口，绝不能回显令牌/密钥。"""
-    raw = client.get("/api/v1/health").get_data(as_text=True).lower()
-    for forbidden in ("jwt_secret", "api_key", "password", "token", "bearer"):
-        assert forbidden not in raw, f"/health 泄露了 {forbidden}"
+    """健康检查是公开接口，绝不能回显令牌/密钥**的值**。
+
+    R6 起这条断言明确盯「值」而不是「词」：`llm_config` 为了可诊断会带上
+    `api_key: "set" | "missing"` 和 `missing: ["LLM_API_KEY"]`——字段名与变量名
+    都必须出现，否则用户没法知道自己缺什么。真正不允许的是把值吐出来。
+    所以这里比对具体密钥，并保留几个纯敏感词（口令、令牌）的字面检查。
+    """
+    resp = client.get("/api/v1/health")
+    raw = resp.get_data(as_text=True)
+    lowered = raw.lower()
+    for forbidden in ("jwt_secret", "password", "token", "bearer"):
+        assert forbidden not in lowered, f"/health 泄露了 {forbidden}"
+
+    real_key = os.getenv("LLM_API_KEY", "")
+    if real_key:
+        assert real_key not in raw, "/health 回显了真实密钥"
+    cfg = resp.get_json()["data"]["llm_config"]
+    assert set(cfg) == {
+        "configured", "api_key", "model", "base_url", "missing", "env_files",
+    }, "字段集变了就要重审：新增字段可能带上不该公开的值"
 
 
 def test_health_counts_are_zero_on_empty_database(client):

@@ -252,9 +252,11 @@ def prepare_delivery(exe: Path, copy_data: bool) -> None:
         print(f"        {kind} {item.name:<28} {size}", flush=True)
 
     # 不自动复制 .env：那等于把模型密钥塞进一个"准备发出去"的目录。
-    # 要用真实模型就手动复制一次，并知道自己在做什么。
+    # R6 起也不必再手动复制——config.env_candidates() 会往上看一级，
+    # 只要 exe 还留在项目内的 dist/，就能读到项目根的 .env（且不产生副本）。
     print("\n[提示] 未复制 .env（避免把模型密钥打进可分发目录）。", flush=True)
-    print("       想用真实模型：copy .env dist\\.env   ← 仅本机自用，不要把这个目录发给别人", flush=True)
+    print("       dist 在项目内时会向上读取项目根的 .env，无需手动复制；", flush=True)
+    print("       若把 dist 单独发给别人，那里没有 .env，仍会自动降级（这是预期）。", flush=True)
 
 
 def main() -> int:

@@ -47,6 +47,7 @@ from app import llm, rewrite
 from app.workflows import WorkflowRecorder, serialize_run
 from app.auth import current_user, login_required
 from app.contract import new_ulid, ok, page_args, paginated
+from app.runtime import current_settings
 from app.errors import (
     ApiError,
     CitationRejected,
@@ -426,6 +427,18 @@ def _refusal_payload(question: str, outcome: RetrievalOutcome,
     }
 
 
+def _degraded_note() -> str:
+    """降级说明要指名缺哪个变量。
+
+    R6 现场：横幅只写"未配置模型密钥"，用户看到的是"我明明配过"——因为
+    exe 在 `dist/` 里找 `.env`，密钥却在项目根。只说"未配置"，等于把定位
+    工作全丢给用户；说清"缺 LLM_API_KEY"，才能区分"没配"与"配了没读到"。
+    """
+    missing = current_settings().llm_missing
+    which = "、".join(missing) if missing else "LLM_API_KEY / LLM_MODEL"
+    return f"未配置大模型（缺 {which}），以下为检索到的原文片段，未经归纳"
+
+
 def _degraded_payload(question: str, outcome: RetrievalOutcome, label: str = "") -> dict:
     """未配置模型时的降级输出：不生成答案，只把最相关的原文片段摆出来。
 
@@ -436,7 +449,7 @@ def _degraded_payload(question: str, outcome: RetrievalOutcome, label: str = "")
         "question": question,
         "mode": "degraded",
         "answer": None,
-        "note": "未配置大模型（LLM_API_KEY / LLM_MODEL），以下为检索到的原文片段，未经归纳",
+        "note": _degraded_note(),
         "retrieval": outcome.to_public(),
         "candidates": [c.to_public(with_content=True) for c in outcome.candidates],
         "conflicts": outcome.conflicts,
