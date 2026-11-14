@@ -15,6 +15,7 @@ import { api, setUnauthorizedHandler, type Health } from './api/client'
 import { useAuthStore } from './stores/auth'
 import { useQAStore } from './stores/qa'
 import BubbleFx from './components/BubbleFx.vue'
+import LogoMark from './components/LogoMark.vue'
 
 const auth = useAuthStore()
 const qa = useQAStore()
@@ -142,7 +143,7 @@ const initials = computed(() => (auth.displayName || '?').slice(0, 1).toUpperCas
 
     <header class="topbar">
       <div class="brand">
-        <span class="logo">知</span>
+        <LogoMark :size="30" />
         <div class="brand-text">
           <strong>知校</strong>
           <small>校园政策理解与事务规划</small>
@@ -207,7 +208,22 @@ const initials = computed(() => (auth.displayName || '?').slice(0, 1).toUpperCas
           <p class="muted small">{{ healthError }}</p>
           <p class="muted tiny mono">请确认后端已启动（默认 http://127.0.0.1:5000）</p>
         </div>
-        <router-view v-else />
+        <!--
+          切换过渡。三处选择都是刻意的：
+
+          1. **用 `mode="out-in"`**：不设时新旧两页会同时存在、一上一下叠着淡，
+             中途能看到两段标题并排（尤其两页都从顶部开始时）。out-in 让旧页先退、
+             新页再进，代价是总时长翻倍，所以单程压到 150/210ms。
+          2. **位移用 6px 而不是 30px**：内容区里长页面很多，位移太大会让人以为
+             "页面滚动了"。轻微上浮只表达"换了一页"，不干扰阅读位置。
+          3. **只在 `content` 里做，不包 `main`**：侧栏与顶栏是常驻外壳，
+             包进去会让导航条每切一次都闪一下。
+        -->
+        <router-view v-else v-slot="{ Component }">
+          <Transition name="page" mode="out-in">
+            <component :is="Component" :key="route.path" />
+          </Transition>
+        </router-view>
       </section>
     </div>
   </div>
@@ -254,22 +270,6 @@ const initials = computed(() => (auth.displayName || '?').slice(0, 1).toUpperCas
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.logo {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  /* 品牌渐变而非纯 primary：白字压在 #2fc7b4 上只有 2.1:1，
-     压到渐变深端就够 4.5:1 了 */
-  background: var(--grad-brand);
-  color: #fff;
-  font-weight: 700;
-  font-size: 15px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
 }
 
 .brand-text {
@@ -400,12 +400,12 @@ nav {
 }
 
 .nav-item.on {
-  /* 用 brand 渐变 + strong 底色：亮青碧铺底配白字只有 2.1:1，读不清。
-     左侧那道 2px 亮线是"当前位置"的第二重信号，不依赖颜色深浅 */
-  background: linear-gradient(90deg, var(--c-primary-strong), rgba(11, 127, 116, 0.55));
-  border-color: var(--c-primary-strong);
-  color: #fff;
-  font-weight: 500;
+  /* 浅底上不再用"深色渐变铺满"：那样整块比周围暗一大截，像被按下去。
+     改为浅色主色调底 + 左侧 2px 实线，颜色深浅不再是唯一信号 */
+  background: var(--c-primary-weak);
+  border-color: var(--c-primary-border);
+  color: var(--c-primary);
+  font-weight: 600;
   box-shadow: inset 2px 0 0 var(--c-primary);
 }
 
@@ -451,6 +451,38 @@ nav {
   min-width: 0;
   padding: var(--space-4) var(--space-6) var(--space-8);
   overflow-x: hidden;
+}
+
+/* ---------- 页面切换过渡 ---------- */
+.page-enter-active {
+  transition: opacity 0.21s ease, transform 0.21s cubic-bezier(0.22, 0.9, 0.25, 1);
+}
+
+.page-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* 动效偏好为"减少"时不做位移动画，只保留极短淡入淡出，
+   避免 out-in 期间出现"空白一瞬" */
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active,
+  .page-leave-active {
+    transition: opacity 0.12s ease;
+  }
+  .page-enter-from,
+  .page-leave-to {
+    transform: none;
+  }
 }
 
 @media (max-width: 900px) {
