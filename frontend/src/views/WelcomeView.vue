@@ -25,6 +25,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { api, type Health } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import AuthPanel from '../components/AuthPanel.vue'
+import LogoMark from '../components/LogoMark.vue'
+import ParticleField from '../components/ParticleField.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -79,7 +81,10 @@ function onMaskClick(event: MouseEvent) {
 
 <template>
   <div class="welcome" :class="{ blurred: panelOpen }">
-    <!-- 背景装饰：两层极慢漂移的光斑。纯位移不过缩放，低配机器上也不掉帧 -->
+    <!-- 背景：粒子层在最底（会连成网状），光斑压在它上面做柔化，
+         两层都不接收指针事件 -->
+    <ParticleField />
+
     <div class="aura" aria-hidden="true">
       <span class="blob b1" />
       <span class="blob b2" />
@@ -89,8 +94,11 @@ function onMaskClick(event: MouseEvent) {
     <main class="hero">
       <p class="eyebrow">校园政策理解与事务规划</p>
 
-      <h1 class="title">
-        <span class="ch">知</span><span class="ch">校</span>
+      <h1 class="brand-row">
+        <LogoMark class="brand-logo" :size="86" />
+        <span class="title">
+          <span class="ch">知</span><span class="ch">校</span>
+        </span>
       </h1>
 
       <p class="tagline">
@@ -166,8 +174,25 @@ function onMaskClick(event: MouseEvent) {
   text-transform: uppercase;
 }
 
+/* 系统名与 logo 并排。logo 比字略小一点（86 vs 108），
+   视觉上两者"同高不同级"——图形是陪衬，字才是主体 */
+.brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(14px, 2.4vw, 26px);
+  margin: 0;
+}
+
+.brand-logo {
+  /* 与标题的光晕同源，让图形和字"长在同一个光源下" */
+  filter: drop-shadow(0 10px 26px rgba(10, 125, 111, 0.22));
+  animation: rise 0.72s cubic-bezier(0.22, 0.9, 0.25, 1) both;
+}
+
 .title {
   margin: 0;
+  display: flex;
   font-size: clamp(64px, 12vw, 108px);
   font-weight: 700;
   line-height: 1.05;
@@ -179,12 +204,13 @@ function onMaskClick(event: MouseEvent) {
    * 但一个像素都不画），在部分老显卡 / 非整数缩放下同样会掉字。
    * 对一个"进站第一眼就要看见系统名"的元素来说这个风险不值得冒。
    *
-   * 改用实色 + 一层青色外发光模拟"墨青→青碧"的走向：任何环境都渲染得出来。
+   * R10 浅底后改为深墨绿实色 + 极淡青影：浅底上白字发光那套完全不成立，
+   * 而深字加一层淡影足以把字从粒子背景里"托"出来。
    */
-  color: #e9f6f3;
+  color: #12302b;
   text-shadow:
-    0 0 2px rgba(47, 199, 180, 0.55),
-    0 12px 40px rgba(47, 199, 180, 0.28);
+    0 1px 0 rgba(255, 255, 255, 0.85),
+    0 14px 38px rgba(10, 125, 111, 0.14);
 }
 
 .ch {
@@ -230,14 +256,14 @@ function onMaskClick(event: MouseEvent) {
   padding: 0 30px;
   border-radius: 999px;
   border: 1px solid var(--c-primary-strong);
-  background: linear-gradient(135deg, var(--c-primary-hover) 0%, var(--c-primary-strong) 92%);
+  background: var(--c-primary-strong);
   color: #fff;
   font-size: 15px;
   font-weight: 600;
   font-family: inherit;
   letter-spacing: 1px;
   cursor: pointer;
-  box-shadow: 0 12px 32px rgba(11, 127, 116, 0.34);
+  box-shadow: 0 10px 26px rgba(10, 125, 111, 0.26);
   transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
 }
 
@@ -249,7 +275,7 @@ function onMaskClick(event: MouseEvent) {
 .start:hover {
   transform: translateY(-2px);
   filter: brightness(1.1);
-  box-shadow: 0 16px 40px rgba(11, 127, 116, 0.44);
+  box-shadow: 0 14px 34px rgba(10, 125, 111, 0.34);
 }
 
 .start:hover i {
@@ -300,7 +326,7 @@ function onMaskClick(event: MouseEvent) {
   height: 520px;
   left: 8%;
   top: -14%;
-  background: rgba(47, 199, 180, 0.17);
+  background: rgba(10, 125, 111, 0.09);
   animation: drift 22s ease-in-out infinite alternate;
 }
 
@@ -309,7 +335,7 @@ function onMaskClick(event: MouseEvent) {
   height: 420px;
   right: 6%;
   bottom: -16%;
-  background: rgba(233, 196, 106, 0.1);
+  background: rgba(156, 100, 16, 0.05);
   animation: drift 27s ease-in-out infinite alternate-reverse;
 }
 
@@ -328,8 +354,8 @@ function onMaskClick(event: MouseEvent) {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+    linear-gradient(to right, rgba(18, 48, 43, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(18, 48, 43, 0.045) 1px, transparent 1px);
   background-size: 72px 72px;
   mask-image: radial-gradient(circle at 50% 42%, #000 0%, transparent 70%);
   -webkit-mask-image: radial-gradient(circle at 50% 42%, #000 0%, transparent 70%);
@@ -344,7 +370,7 @@ function onMaskClick(event: MouseEvent) {
   align-items: center;
   justify-content: center;
   padding: var(--space-4);
-  background: rgba(4, 10, 9, 0.62);
+  background: rgba(18, 48, 43, 0.28);
   backdrop-filter: blur(2px);
 }
 

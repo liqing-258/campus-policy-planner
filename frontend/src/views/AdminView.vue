@@ -32,8 +32,20 @@ const qa = ref<QaData | null>(null)
 /** 悬浮提示。`x/y` 是视口坐标，浮层用 position:fixed 跟着指针走 */
 const tip = ref<{ x: number; y: number; title: string; lines: string[] } | null>(null)
 
-const KEYWORD_COLORS = ['#2fc7b4', '#4ad98a', '#6fb6e8', '#e9c46a', '#a78bfa', '#f26d7d', '#7fd6c8']
-const TOPIC_COLORS = ['#2fc7b4', '#4ad98a', '#6fb6e8', '#e9c46a', '#a78bfa', '#f26d7d']
+/**
+ * 词云 / 饼图的分类色。
+ *
+ * R10 浅底后必须整组换掉：原来那组是给深底配的**亮色**（#2fc7b4 这类），
+ * 压在白卡上对比度只有 2:1 上下，词云的多字号小字会糊成一片。
+ * 换成同色相的深色版后，七个色在**白底上全部 ≥4.95:1**，
+ * 且两两亮度差最小 0.0034——词云里字号不一，光靠色相分辨不够，
+ * 亮度也得拉开一档。
+ *
+ * 这一组不是"好看就行"：改色时用脚本算过对比度与两两亮度差，
+ * 否则很容易出现两个颜色在白底上几乎等价、只有设计者本人分得清的情况。
+ */
+const KEYWORD_COLORS = ['#0a7d6f', '#1f7a4d', '#1f6ea8', '#9c6410', '#6b4fbb', '#b8314a', '#8a3f8f']
+const TOPIC_COLORS = ['#0a7d6f', '#1f7a4d', '#1f6ea8', '#9c6410', '#6b4fbb', '#b8314a']
 
 onMounted(async () => {
   const [p, q] = await Promise.allSettled([

@@ -1,54 +1,73 @@
 /* ============================================================
    设计令牌 —— 全局唯一来源
-   R9 换肤：从「深蓝 + 靛蓝主色」改为「墨青底 + 青碧主色 + 暖砂点缀」。
-   换肤只改这一处；组件内一律写 var(--…)，不许写死色值（R9 已全仓扫过一遍）。
+   R10 换肤：从「墨青深底」改为「浅底青碧」。
+   换肤只改这一处；组件内一律写 var(--…)，不许写死色值。
 
-   为什么是三色而不是两色：青碧负责"可点击、可聚焦"，暖砂负责"数字与强调"。
-   两者都往冷色靠会让界面变成一片蓝绿、层级全靠亮度差；
-   而状态色（符合/不符合/无法判定）必须留给语义，不参与品牌表达。
+   ## 为什么这次不是简单地把颜色反过来
 
-   对比度按 WCAG AA 校过：
-   - 正文 --c-text 于 --c-bg ≈ 15:1
-   - 次级文字 --c-text-2 ≈ 6.4:1
-   - 按钮白字于 --c-primary-strong ≈ 4.9:1
-   --c-primary（亮青碧）只用于**文字/描边/进度条**，不铺大面积底色 ——
-   亮色底配白字读不清，配深字又显得脏，这是旧版 .btn 直接用 primary 遗留的问题。
+   深底转浅底最常翻车的地方不是色相，是**"往白里加白"**：
+   深色主题里 `rgba(255,255,255,0.05)` 表示"比背景亮一点点"，
+   到了白底上它等于什么都没画——输入框、分段控件、悬停态会集体消失。
+   所以这次新增了一组 `--c-elev-*`（elevation，抬升）令牌，
+   统一用**深色低透明度**表达"比背景高一层"：
+   - --c-elev-1 表面内的凹陷/填充（输入框、分段底）
+   - --c-elev-2 表面上的悬停
+   - --c-elev-3 表面上的按下/选中
+   组件里凡是要"稍微提亮/压暗"的地方，一律引用这三个，不要再写 rgba(255,255,255,…)。
+
+   ## 对比度（scripts 实测，WCAG AA）
+
+   所有文字色都在 **surface / bg / surface-2** 三种底上验过，最低 4.53:1：
+   正文 12.7–14.2、次级 5.2–5.8、弱化 4.5–5.1、主色链接 4.7–5.0、
+   按钮白字 5.0–6.4、强调数字 4.6–5.0、状态色 4.9–6.1。
+
+   **主色分工这一条在浅底上反过来了**：深底时是"亮青碧做文字、深青碧做底"；
+   浅底时必须反过来——`--c-primary` 必须够深才能当文字（#0a7d6f，5.0:1），
+   而铺底时用更深的 `--c-primary-strong` 才压得住白字（6.4:1）。
+   别再往 `--c-primary` 上放白字：实测只有 5.03:1，够用但没有余量，
+   而且大面积亮绿铺底在浅色界面里会显脏。
    ============================================================ */
 :root {
-  --c-bg: #08110f;
-  --c-surface: #0e1a18;
-  --c-surface-2: #132320;
-  --c-surface-3: #19302c;
-  --c-border: #1d3532;
-  --c-border-strong: #2a4a45;
+  --c-bg: #f4f8f7;
+  --c-surface: #ffffff;
+  --c-surface-2: #eef4f2;
+  --c-surface-3: #e3edea;
+  --c-border: #dbe7e3;
+  --c-border-strong: #c3d5cf;
 
-  --c-text: #e7f1ee;
-  --c-text-2: #90a8a3;
-  --c-dim: #647d78;
+  /* 抬升层：浅底上表达"比背景高一层"只能用深色低透明度，不能用白色叠加 */
+  --c-elev-1: rgba(18, 48, 43, 0.045);
+  --c-elev-2: rgba(18, 48, 43, 0.075);
+  --c-elev-3: rgba(18, 48, 43, 0.115);
+  --c-elev-line: rgba(18, 48, 43, 0.08);
 
-  --c-primary: #2fc7b4;
-  --c-primary-strong: #0b7f74;
-  --c-primary-hover: #0e9488;
-  --c-primary-weak: rgba(47, 199, 180, 0.12);
-  --c-primary-border: rgba(47, 199, 180, 0.4);
+  --c-text: #12302b;
+  --c-text-2: #4d6b64;
+  --c-dim: #5f736d;
 
-  --c-accent: #e9c46a;
-  --c-accent-weak: rgba(233, 196, 106, 0.14);
+  --c-primary: #0a7d6f;
+  --c-primary-strong: #076b5e;
+  --c-primary-hover: #0a8375;
+  --c-primary-weak: rgba(10, 125, 111, 0.1);
+  --c-primary-border: rgba(10, 125, 111, 0.36);
 
-  --c-met: #4ad98a;
-  --c-met-bg: rgba(74, 217, 138, 0.12);
-  --c-met-border: rgba(74, 217, 138, 0.38);
+  --c-accent: #9c6410;
+  --c-accent-weak: rgba(156, 100, 16, 0.1);
 
-  --c-not-met: #f26d7d;
-  --c-not-met-bg: rgba(242, 109, 125, 0.12);
-  --c-not-met-border: rgba(242, 109, 125, 0.4);
+  --c-met: #19804e;
+  --c-met-bg: rgba(25, 128, 78, 0.1);
+  --c-met-border: rgba(25, 128, 78, 0.32);
 
-  --c-unknown: #e8b44a;
-  --c-warn-bg: rgba(232, 180, 74, 0.12);
-  --c-warn-border: rgba(232, 180, 74, 0.38);
+  --c-not-met: #c03a50;
+  --c-not-met-bg: rgba(192, 58, 80, 0.09);
+  --c-not-met-border: rgba(192, 58, 80, 0.32);
 
-  --c-info: #6fb6e8;
-  --c-purple: #a78bfa;
+  --c-unknown: #96660c;
+  --c-warn-bg: rgba(150, 102, 12, 0.09);
+  --c-warn-border: rgba(150, 102, 12, 0.32);
+
+  --c-info: #1f6ea8;
+  --c-purple: #6b4fbb;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -59,15 +78,15 @@
 
   --radius-card: 14px;
   --radius-control: 9px;
-  --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.34);
-  --shadow-pop: 0 18px 48px rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 1px 2px rgba(18, 48, 43, 0.05), 0 6px 18px rgba(18, 48, 43, 0.06);
+  --shadow-pop: 0 12px 32px rgba(18, 48, 43, 0.16), 0 2px 6px rgba(18, 48, 43, 0.08);
 
-  /* 页面底色的一层极淡光晕：纯色底在 27 寸屏上会显得"糊成一块"，
-     两处径向渐变足够把视线从边角拉回中间，又不会被误认为加载态 */
+  /* 页面底色的一层极淡光晕：浅底上不要用大面积饱和色，
+     两处低透明度径向渐变只负责"视线往中间收"，不做装饰 */
   --grad-page:
-    radial-gradient(900px 420px at 12% -8%, rgba(47, 199, 180, 0.10), transparent 62%),
-    radial-gradient(760px 380px at 92% 4%, rgba(233, 196, 106, 0.06), transparent 60%);
-  --grad-brand: linear-gradient(135deg, #2fc7b4 0%, #0b7f74 72%);
+    radial-gradient(900px 420px at 12% -8%, rgba(10, 125, 111, 0.07), transparent 62%),
+    radial-gradient(760px 380px at 92% 4%, rgba(156, 100, 16, 0.045), transparent 60%);
+  --grad-brand: linear-gradient(135deg, #12a892 0%, #076b5e 78%);
 }
 
 * {
@@ -219,8 +238,9 @@ a {
   border-radius: var(--radius-card);
   padding: var(--space-4) var(--space-4);
   min-width: 0;
-  /* 内高光一条：纯描边的卡片在深色底上像"贴上去的"，这道 1px 亮线把它压进背景 */
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  /* 浅底上内高光会把卡片边缘压暗一块，改用"极浅的实心投影 + 1px 实边框"分层。
+     投影留在 box-shadow 里而不是再加 border，是为了不改变 1px 布局 */
+  box-shadow: var(--shadow-card);
 }
 
 .card > h3 {
@@ -589,7 +609,7 @@ table tbody tr:last-child td {
 }
 
 .table tbody tr:hover td {
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--c-elev-1);
 }
 
 /* ---------- 列表 ---------- */

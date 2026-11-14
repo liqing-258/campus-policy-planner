@@ -19,6 +19,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, type Captcha, type RegisterResult } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import LogoMark from './LogoMark.vue'
 
 const emit = defineEmits<{ close: []; done: [] }>()
 
@@ -183,7 +184,7 @@ function fillDemo(which: 'student' | 'admin') {
     </button>
 
     <header class="head">
-      <span class="logo">知</span>
+      <LogoMark :size="44" />
       <div class="head-text">
         <strong>知校</strong>
         <small>校园政策理解与事务规划系统</small>
@@ -280,13 +281,17 @@ function fillDemo(which: 'student' | 'admin') {
       </button>
 
       <div class="demo">
-        <span class="dim tiny">演示账号</span>
-        <button type="button" class="demo-chip" @click="fillDemo('student')">
-          学生 student / student123
-        </button>
-        <button type="button" class="demo-chip" @click="fillDemo('admin')">
-          管理员 admin / admin123
-        </button>
+        <span class="demo-label">演示账号</span>
+        <div class="demo-grid">
+          <button type="button" class="demo-chip" @click="fillDemo('student')">
+            <span class="chip-role">学生</span>
+            <span class="chip-cred mono">student / student123</span>
+          </button>
+          <button type="button" class="demo-chip" @click="fillDemo('admin')">
+            <span class="chip-role">管理员</span>
+            <span class="chip-cred mono">admin / admin123</span>
+          </button>
+        </div>
       </div>
     </form>
 
@@ -367,11 +372,9 @@ function fillDemo(which: 'student' | 'admin') {
   width: min(420px, calc(100vw - 32px));
   padding: 26px 26px 22px;
   border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: linear-gradient(180deg, rgba(16, 32, 30, 0.98), rgba(10, 20, 19, 0.98));
-  box-shadow:
-    0 28px 70px rgba(0, 0, 0, 0.55),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-pop);
   color: var(--c-text);
   backdrop-filter: blur(14px);
 }
@@ -393,7 +396,7 @@ function fillDemo(which: 'student' | 'admin') {
 }
 
 .close:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--c-elev-2);
   color: var(--c-text);
 }
 
@@ -402,21 +405,6 @@ function fillDemo(which: 'student' | 'admin') {
   align-items: center;
   gap: 12px;
   margin-bottom: 20px;
-}
-
-.logo {
-  width: 42px;
-  height: 42px;
-  flex: none;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--grad-brand);
-  color: #fff;
-  font-size: 21px;
-  font-weight: 700;
-  box-shadow: 0 6px 18px rgba(11, 127, 116, 0.4);
 }
 
 .head-text {
@@ -442,8 +430,8 @@ function fillDemo(which: 'student' | 'admin') {
   gap: 4px;
   padding: 4px;
   border-radius: 11px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border);
   margin-bottom: 10px;
 }
 
@@ -469,9 +457,9 @@ function fillDemo(which: 'student' | 'admin') {
 }
 
 .seg-btn.on {
-  background: var(--grad-brand);
+  background: var(--c-primary-strong);
   color: #fff;
-  box-shadow: 0 4px 14px rgba(11, 127, 116, 0.35);
+  box-shadow: var(--shadow-card);
 }
 
 .form {
@@ -501,8 +489,8 @@ function fillDemo(which: 'student' | 'admin') {
   min-height: 40px;
   padding: 0 12px;
   border-radius: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid var(--c-border-strong);
+  background: var(--c-surface);
   color: var(--c-text);
   font-size: 13.5px;
   font-family: inherit;
@@ -516,8 +504,8 @@ function fillDemo(which: 'student' | 'admin') {
 
 .field input:focus {
   border-color: var(--c-primary);
-  background: rgba(255, 255, 255, 0.07);
-  box-shadow: 0 0 0 3px rgba(47, 199, 180, 0.16);
+  background: var(--c-surface);
+  box-shadow: 0 0 0 3px var(--c-primary-weak);
 }
 
 .captcha-row {
@@ -529,9 +517,9 @@ function fillDemo(which: 'student' | 'admin') {
 
 .captcha-img {
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--c-border-strong);
   border-radius: 9px;
-  background: #eef4f2;
+  background: var(--c-surface);
   cursor: pointer;
   overflow: hidden;
   display: flex;
@@ -553,7 +541,7 @@ function fillDemo(which: 'student' | 'admin') {
   width: 100%;
   border-radius: 10px;
   border: 1px solid var(--c-primary-strong);
-  background: linear-gradient(135deg, var(--c-primary-hover) 0%, var(--c-primary-strong) 90%);
+  background: var(--c-primary-strong);
   color: #fff;
   font-size: 14px;
   font-weight: 600;
@@ -576,37 +564,74 @@ function fillDemo(which: 'student' | 'admin') {
   margin: 0;
   padding: 7px 10px;
   border-radius: 8px;
-  background: rgba(242, 109, 125, 0.12);
-  border: 1px solid rgba(242, 109, 125, 0.34);
+  background: var(--c-not-met-bg);
+  border: 1px solid var(--c-not-met-border);
   color: var(--c-not-met);
   font-size: 12.5px;
 }
 
 .demo {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
   padding-top: 12px;
   margin-top: 2px;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid var(--c-border);
+}
+
+/* 标签单独一行、两枚 chip 等分一行。
+   原来用 flex-wrap 平铺，标签和 chip 挤在同一行时会因文字宽度不同
+   而错位（截图里"演示账号"缩在左侧、两个 chip 换行后左边缘对不齐）。
+   标签独占一行 + 网格等分，左右边缘天然对齐，也不受账号字符串长度影响。 */
+.demo-label {
+  font-size: 11.5px;
+  color: var(--c-dim);
+}
+
+.demo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 .demo-chip {
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 7px 10px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--c-border-strong);
+  background: var(--c-surface-2);
   color: var(--c-text-2);
   font-size: 11.5px;
   font-family: inherit;
+  text-align: left;
   cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
 
 .demo-chip:hover {
-  border-color: rgba(47, 199, 180, 0.5);
+  border-color: var(--c-primary-border);
+  background: var(--c-primary-weak);
   color: var(--c-primary);
+}
+
+.chip-role {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.demo-chip:hover .chip-role {
+  color: var(--c-primary);
+}
+
+.chip-cred {
+  font-size: 10.5px;
+  letter-spacing: -0.2px;
+  color: var(--c-dim);
+  white-space: nowrap;
 }
 
 .foot {
@@ -657,8 +682,8 @@ function fillDemo(which: 'student' | 'admin') {
   gap: 10px;
   padding: 18px;
   border-radius: 12px;
-  border: 1px dashed rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed var(--c-border-strong);
+  background: var(--c-surface-2);
 }
 
 .admin-note p {
