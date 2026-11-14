@@ -5,7 +5,8 @@
  * 布局参照常见对话式助手：解答在上方主区、提问框固定在底部、
  * 右侧常驻「我提问过的问题」。改布局时**没有删掉任何一项验收能力**：
  *
- * 1. 答得出来 —— 正文 + 每条结论后面的 [n]，点开能看到原文
+ * 1. 答得出来 —— 正文 + 可展开的「引用片段」，展开能看到原文与页码
+ *    （R8 起正文不再夹 [n]，改动理由见 stripCitationMarks 的注释）
  * 2. 答不出来就拒答 —— 明确说"证据不足"，并列出被闸门拦下的候选
  * 3. 未配模型时降级 —— 只给原文片段，不假装给过归纳
  * 4. 节点轨迹是真的 —— 执行过几个节点就显示几个"完成"，
@@ -177,6 +178,9 @@ async function ask(text?: string) {
   ratingFor.value = ''
   ratingReason.value = ''
   feedbackError.value = ''
+  // 新的一轮重新给建议：上一轮关掉的那栏，问完这一句又该出现了
+  suggestClosed.value = false
+  citationsOpen.value = false
   const timer = window.setInterval(() => (elapsed.value += 100), 100)
 
   /**
@@ -453,8 +457,27 @@ function escapeHtml(raw: string): string {
  * 先转义再加粗，顺序不能反——反过来会把 <strong> 自己的尖括号也转义掉。
  * 历史轮次也走这个函数（见 renderText），免得"刚答完"与"切回来"排版不一样。
  */
+/**
+ * 去掉正文里的引注编号 `[1]` `[2]`（R8）。
+ *
+ * 模型输出带 [n] 是为了让"哪句话出自哪条片段"可核对，但用户读的是结论：
+ * 一串 [1][2] 嵌在句子中间会把中文切得支离破碎
+ * （"报名费标准为四级 30 元、六级 35 元 [1][2]"），而片段列表就在下面。
+ * 现在正文不带编号，出处改由下方「引用片段」承担——默认收起，展开逐条可看原文。
+ *
+ * **只剥纯数字的方括号**：`[附件1]`、`[注]` 这类是有意义的正文，不能动。
+ * 三条约束：1–3 位数字、连续几个一起剥、只吃同一行内的空格
+ * （不吃换行——正文是 `white-space: pre-wrap`，换行本身就是排版）。
+ *
+ * 剥离放在**渲染时**而不是落库时：库里的消息还留着编号，
+ * 将来若要恢复"点 [1] 跳转片段"的能力，不用重新跑一遍问答。
+ */
+function stripCitationMarks(text: string): string {
+  return text.replace(/[ \t]*(?:\[\d{1,3}\])+/g, '')
+}
+
 function renderText(raw: string): string {
-  return escapeHtml(raw).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  return escapeHtml(stripCitationMarks(raw)).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
 }
 
 const answerHtml = computed(() => renderText(answer.value?.answer ?? ''))
@@ -562,22 +585,63 @@ const followUps = computed<string[]>(() => {
 
 const suggestItems = computed(() => (hasResult.value ? followUps.value : examples))
 /**
- * 建议问题的显隐规则，两条要求叠在一起：
+ * 用户点了建议栏右上角的关闭按钮。**只关这一次**：
+ * 下一次提问（`ask()`）会重置成 false，免得关过一次以后永远看不到。
+ */
+const suggestClosed = ref(false)
+/**
+ * 建议问题的显隐规则，三条要求叠在一起：
  * - 还没问过 → 只有聚焦输入框才出现（不做"一进页面就铺三条"的引导感）
  * - 已经答过一轮 → 常驻，让用户看得见"还能接着问什么"
+ * - 用户按了关闭 → 立刻收起，且不因为输入框重新聚焦又弹回来
  */
 const suggestOpen = computed(() => {
+  if (suggestClosed.value) return false
   if (!suggestItems.value.length) return false
   if (focusOpen.value) return true
   return Boolean(answer.value || refusal.value || degraded.value || citationRejected.value)
 })
 const suggestTitle = computed(() => (hasResult.value ? '继续追问' : '你可以这样问'))
 
-/** 点建议＝真的要问，直接提交（与"点历史只填入"刻意不同） */
+/**
+ * **R8：点建议只填入，不提交。**
+ *
+ * 用户的原话是"点击继续追问按钮时将该问题放置于对话框中，
+ * 用户按下发送或是 enter 键才会发送"。
+ *
+ * 改之前是 `ask(text)` 直接发出去。那时理由是"点了就是要问"，
+ * 但代价是**建议一次就消耗一次提问**：用户想先改两个字再问，
+ * 或者只是想把它当参考看看，点一下就直接发了，还得等一轮才轮到改。
+ * 与右侧历史列表的行为也对不上——那边早就是"只填入"。
+ */
 function useSuggestion(text: string) {
   question.value = text
-  ask(text)
+  // 填完就收起建议栏：它现在挡在输入框上方，用户接下来要读的是输入框里的那句话
+  suggestClosed.value = true
+  nextTick(() => {
+    inputRef.value?.focus()
+    autoGrow()
+  })
 }
+
+/**
+ * Enter 发送，Shift + Enter 换行（R8）。
+ *
+ * **必须让过输入法的组词回车**：中文输入法里回车是"确认候选词"，
+ * 拦掉它就等于用中文打字时按一下回车发一条半成品。
+ * `isComposing` 是标准判据，`keyCode === 229` 是老内核的兜底。
+ *
+ * 模板用 `@keydown.enter.exact`，所以 Shift+Enter 根本进不到这里——
+ * 它走 textarea 的默认行为，插一个换行符。
+ */
+function onEnterSend(event: KeyboardEvent) {
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  ask()
+}
+
+/** 引用片段默认收起（R8）：解答只留结论，出处要看再展开 */
+const citationsOpen = ref(false)
 
 function autoGrow() {
   const el = inputRef.value
@@ -613,8 +677,8 @@ onBeforeUnmount(() => {
       <div class="chat-title">
         <h2>智能问答</h2>
         <p class="muted small">
-          解答里的每个 [n] 都对应知识库中一条真实片段，点开可以核对原文；
-          证据不足时系统会直接说不知道，而不是编一个看起来合理的说法。
+          解答只依据知识库里的政策原文；想核对出处时，展开「引用片段」就能看到
+          对应的原文与页码。证据不足时系统会直接说不知道，而不是编一个看起来合理的说法。
         </p>
       </div>
       <button
@@ -647,7 +711,7 @@ onBeforeUnmount(() => {
               从奖学金条件到成绩单办理，回答只依据知识库里的政策原文。
             </p>
             <ul class="hello-points">
-              <li>每个 [n] 对应一条真实片段，可展开看原文</li>
+              <li>解答只依据政策原文，出处收在「引用片段」里，展开可核对</li>
               <li>同一政策有多个版本时并列提示，不替你挑一个</li>
               <li>觉得不对，可以标记「没帮助」并选原因</li>
             </ul>
@@ -736,23 +800,36 @@ onBeforeUnmount(() => {
             <div class="answer-text" v-html="answerHtml" />
             <p v-if="answer.disclaimer" class="muted tiny">{{ answer.disclaimer }}</p>
 
-            <h4 class="sec-title">引用片段</h4>
-            <ol class="cite-list">
-              <li v-for="c in answer.citations" :key="c.chunk_id">
-                <button
-                  class="cite-head"
-                  @click="openCitation = openCitation === c.chunk_id ? '' : c.chunk_id"
-                >
-                  <span class="tag plain">[{{ c.index }}]</span>
-                  <strong>{{ c.document_title }}</strong>
-                  <span class="muted small">{{ evidenceLabel(c.page_number, c.section_title) }}</span>
-                  <span class="muted tiny mono">覆盖率 {{ (c.coverage * 100).toFixed(0) }}%</span>
-                  <span v-if="c.injection" class="tag unknown" title="该片段含指令式文字，已降权">含疑点</span>
-                  <span class="cite-toggle">{{ openCitation === c.chunk_id ? '收起' : '展开' }}</span>
+            <!--
+              引用片段默认收起（R8）。用户要的是"答案"，不是"证据清单"——
+              两条折叠卡片横在结论和政策原文之间，读起来像在往下翻文档。
+              但出处必须留着且点得开：这一页承诺的是"每句话都能核对"，
+              默认藏起来和删掉是两件事。
+            -->
+            <template v-if="answer.citations.length">
+              <div class="sec-head">
+                <h4 class="sec-title">引用片段（{{ answer.citations.length }}）</h4>
+                <button class="sec-toggle" @click="citationsOpen = !citationsOpen">
+                  {{ citationsOpen ? '收起' : '展开' }}
                 </button>
-                <p v-if="openCitation === c.chunk_id" class="cite-body">{{ c.content }}</p>
-              </li>
-            </ol>
+              </div>
+              <ol v-if="citationsOpen" class="cite-list">
+                <li v-for="c in answer.citations" :key="c.chunk_id">
+                  <button
+                    class="cite-head"
+                    @click="openCitation = openCitation === c.chunk_id ? '' : c.chunk_id"
+                  >
+                    <span class="tag plain">[{{ c.index }}]</span>
+                    <strong>{{ c.document_title }}</strong>
+                    <span class="muted small">{{ evidenceLabel(c.page_number, c.section_title) }}</span>
+                    <span class="muted tiny mono">覆盖率 {{ (c.coverage * 100).toFixed(0) }}%</span>
+                    <span v-if="c.injection" class="tag unknown" title="该片段含指令式文字，已降权">含疑点</span>
+                    <span class="cite-toggle">{{ openCitation === c.chunk_id ? '收起' : '展开' }}</span>
+                  </button>
+                  <p v-if="openCitation === c.chunk_id" class="cite-body">{{ c.content }}</p>
+                </li>
+              </ol>
+            </template>
 
             <!-- 政策原文：只给站内链接，不伪造外部网址 -->
             <template v-if="sources.length">
@@ -825,41 +902,31 @@ onBeforeUnmount(() => {
             </p>
           </section>
 
-          <!-- ============ 节点轨迹（可折叠） ============ -->
+          <!-- ============ 节点轨迹（可折叠，R8 起只留一行） ============ -->
+          <!--
+            R8：原来展开是「6 张节点卡片网格」+「6 条摘要列表」+「一段说明」，
+            同一件事说三遍，占掉半屏。用户的原话是"简约显示即可（甚至可以不显示）"。
+            现在展开只有一行：节点名 + 状态 + 耗时，每个节点带 title（悬停看它的 summary）。
+            没删掉诊断能力——链路的每个节点、耗时、成败仍然一字不少，只是不再各占一张卡。
+          -->
           <details v-if="workflow" class="trace-box">
             <summary>
-              <span>本次处理过程</span>
+              <span>处理过程</span>
               <span class="muted tiny">
                 {{ workflow.executed_count }} / {{ workflow.node_count }} 个节点执行 ·
                 共 {{ workflow.total_ms }} ms · 模型调用 {{ workflow.model_calls }} 次
                 <template v-if="workflow.outcome"> · {{ RUN_OUTCOME_LABEL[workflow.outcome] ?? workflow.outcome }}</template>
               </span>
             </summary>
-            <ol class="trace">
-              <li
-                v-for="node in workflow.nodes"
-                :key="node.node"
-                :class="['trace-node', nodeStatus(node.status).tone]"
-                :title="node.summary"
-              >
-                <span class="trace-label">{{ node.label }}</span>
-                <span class="trace-status">{{ nodeStatus(node.status).label }}</span>
-                <span class="trace-meta mono">
-                  <template v-if="node.status === 'skipped'">—</template>
-                  <template v-else>{{ node.ms }} ms</template>
+            <p class="trace-line mono">
+              <template v-for="(node, i) in workflow.nodes" :key="node.node">
+                <span v-if="i > 0" class="trace-sep">·</span>
+                <span :title="node.summary" :class="['trace-item', nodeStatus(node.status).tone]">
+                  {{ node.label }} {{ nodeStatus(node.status).label }}<template
+                    v-if="node.status !== 'skipped'"
+                  > {{ node.ms }}ms</template>
                 </span>
-              </li>
-            </ol>
-            <ul class="trace-summaries">
-              <li v-for="node in workflow.nodes" :key="node.node">
-                <strong>{{ node.label }}</strong>
-                <span class="tag plain">{{ nodeStatus(node.status).label }}</span>
-                <span class="muted small">{{ node.summary }}</span>
-              </li>
-            </ul>
-            <p class="muted tiny">
-              系统按「理解问题 → 检索原文 → 组织解答 → 校验引用」四步处理这次提问；
-              灰显的步骤本次没有涉及（资格匹配与计划生成属于另外两条链路）。
+              </template>
             </p>
           </details>
 
@@ -1045,12 +1112,25 @@ onBeforeUnmount(() => {
     <!-- 底部：建议问题 + 输入框（固定，不随内容滚动） -->
     <footer class="composer">
       <div v-if="suggestOpen" class="suggest">
-        <span class="suggest-label">{{ suggestTitle }}</span>
+        <div class="suggest-head">
+          <span class="suggest-label">{{ suggestTitle }}</span>
+          <button
+            class="suggest-close"
+            title="收起建议问题"
+            aria-label="收起建议问题"
+            @click="suggestClosed = true"
+          >×</button>
+        </div>
         <div class="chips">
+          <!--
+            点一下只**填入**输入框，不提交（R8）。`@mousedown.prevent` 保持 textarea 的焦点，
+            免得点完 chip 焦点跑掉、`focusOpen` 变 false 把建议栏自己关掉。
+          -->
           <button
             v-for="s in suggestItems"
             :key="s"
             class="chip"
+            :title="`点击填入输入框：${s}`"
             @mousedown.prevent
             @click="useSuggestion(s)"
           >{{ s }}</button>
@@ -1066,14 +1146,14 @@ onBeforeUnmount(() => {
           @focus="focusOpen = true"
           @blur="focusOpen = false"
           @input="autoGrow"
-          @keydown.ctrl.enter.prevent="ask()"
+          @keydown.enter.exact="onEnterSend"
         />
         <button class="send" :disabled="asking || !question.trim()" @click="ask()">
           {{ asking ? '处理中' : '发送' }}
         </button>
       </div>
       <div class="composer-foot">
-        <span>Ctrl + Enter 发送</span>
+        <span>Enter 发送 · Shift + Enter 换行</span>
         <span>回答只依据知识库中的政策原文</span>
       </div>
     </footer>
@@ -1372,8 +1452,7 @@ onBeforeUnmount(() => {
 /* ---------- 引用 ---------- */
 .cite-list,
 .reject-list,
-.source-list,
-.trace-summaries {
+.source-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -1525,68 +1604,61 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 
-.trace {
-  list-style: none;
-  margin: var(--space-3) 0 var(--space-2);
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: var(--space-2);
-}
-
-.trace-node {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--space-2);
-  border: 1px solid var(--c-border);
-  border-radius: var(--radius-control);
-  background: var(--c-bg);
-  border-top-width: 3px;
-}
-
-.trace-node.met {
-  border-top-color: var(--c-met);
-}
-
-.trace-node.unknown {
-  border-top-color: var(--c-unknown);
-}
-
-.trace-node.not_met {
-  border-top-color: var(--c-not-met);
-}
-
-.trace-node.plain {
-  border-top-color: var(--c-border);
-  opacity: 0.55;
-}
-
-.trace-label {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.trace-status {
-  font-size: 11px;
+/* R8：展开只有这一行。原来这里是 6 张卡片 + 6 条摘要 + 一段说明。 */
+.trace-line {
+  margin: var(--space-2) 0 0;
+  font-size: 11.5px;
+  line-height: 1.9;
   color: var(--c-text-2);
 }
 
-.trace-meta {
-  font-size: 10px;
-  color: var(--c-text-2);
+.trace-sep {
+  margin: 0 6px;
+  color: var(--c-dim);
 }
 
-.trace-summaries {
-  margin-bottom: var(--space-2);
-  font-size: 12px;
+.trace-item.met {
+  color: var(--c-met);
 }
 
-.trace-summaries li {
+.trace-item.unknown {
+  color: var(--c-unknown);
+}
+
+.trace-item.not_met {
+  color: var(--c-not-met);
+}
+
+/* 未执行的节点保持灰：把没执行画成"完成"会让这一行好看，但那是在骗人 */
+.trace-item.plain {
+  color: var(--c-dim);
+}
+
+/* ---------- 分节标题（带右侧展开开关） ---------- */
+.sec-head {
   display: flex;
-  gap: var(--space-2);
   align-items: baseline;
-  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+.sec-head .sec-title {
+  margin: 0;
+}
+
+.sec-toggle {
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--c-primary);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.sec-toggle:hover {
+  text-decoration: underline;
 }
 
 /* ---------- 冲突 ---------- */
@@ -1745,11 +1817,39 @@ onBeforeUnmount(() => {
   background: var(--c-surface);
 }
 
+.suggest-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: 6px;
+}
+
 .suggest-label {
-  display: block;
   font-size: 11.5px;
   color: var(--c-text-2);
-  margin-bottom: 6px;
+}
+
+/* 关闭按钮贴右上角：建议栏常在答完之后一直挂着，得给一个明确的"我不需要" */
+.suggest-close {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--c-dim);
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.suggest-close:hover {
+  background: var(--c-surface-2);
+  color: var(--c-text);
 }
 
 .chips {
@@ -1867,12 +1967,6 @@ onBeforeUnmount(() => {
 
   .chat-side {
     display: none;
-  }
-}
-
-@media (max-width: 800px) {
-  .trace {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 </style>
