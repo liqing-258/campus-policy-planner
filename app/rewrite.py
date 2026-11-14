@@ -133,6 +133,58 @@ def _clean_terms(raw, query: str, limit: int) -> list[str]:
     return out
 
 
+# 降级兜底拼接后，整条检索问句的最大长度。太长会让"上一轮问题"盖过"这一轮的追问"，
+# 覆盖率分母也跟着膨胀（和 §7.2.4 里"年份进分母"是同一类问题）。
+PRONOUN_QUERY_MAX_CHARS = 120
+
+
+def _last_user_question(history: list[dict]) -> str:
+    for item in reversed(history):
+        if item.get("role") == "user":
+            text = (item.get("content") or "").strip().replace("\n", " ")
+            if text:
+                return text[:HISTORY_MSG_MAX_CHARS]
+    return ""
+
+
+def resolve_pronoun_query(query: str, history: list[dict] | None = None) -> str | None:
+    """**确定性**还原纯指代追问：把上一轮问题拼进来。没有模型也能用。
+
+    为什么需要它：§7.2.4 的查询改写是**模型调用**，降级模式（无 `LLM_API_KEY`）直接跳过，
+    于是"那它要多久""这个要准备什么"这类字面没有主题词的追问零召回、必拒答（B-11 的另一半）。
+
+    **只在"这一问确实没有主题词"时才拼**。R3 否掉过"把上一轮问题拼进检索"这个做法，
+    理由是用户换话题时会把无关片段带进来；那个判断针对的是**所有**追问。
+    这里把适用面收窄到一个很窄的条件：
+
+        当前问句分词后，去掉"那/它/这个/要多久/怎么"这类虚词，一个主题词都不剩
+
+    此时拼接不会"带偏"——本来就什么都没指向，不拼就是必然拒答。
+    而只要用户自己说了主题词（哪怕一个），就完全不拼，保持 R3 的判断。
+
+    拼接结果仍要过覆盖率闸门（O 路原话也仍在候选池里），所以"改写只做加法"没有被破坏。
+    """
+    from app.anchors import is_open_query
+    from app.indexing import tokenize
+
+    text = (query or "").strip()
+    if not text:
+        return None
+    if not is_open_query(tokenize(text)):
+        return None           # 用户自己说了主题词：不拼，交给正常检索
+    previous = _last_user_question(history or [])
+    if not previous:
+        return None           # 没有上文可还原
+    if is_open_query(tokenize(previous)):
+        return None           # 上一轮也没有主题词（连续追问"那它呢"），拼了也没用
+    # 先给当前问句留足额度，只裁上一轮：反过来的话，上一轮一长就会把"用户这一轮问了什么"
+    # 整个截掉——检索照样能跑，但轨迹里看不到最后那句，排查时容易被误导。
+    budget = PRONOUN_QUERY_MAX_CHARS - len(text) - 1
+    if budget <= 0:
+        return None           # 追问本身就超长，不拼（退回改前的行为，不算退化）
+    return f"{previous[:budget].strip()} {text}"
+
+
 def rewrite_query(query: str, history: list[dict] | None = None) -> RewriteResult:
     """改写问题。**任何失败都退回原查询**，不向上抛。"""
     original = (query or "").strip()

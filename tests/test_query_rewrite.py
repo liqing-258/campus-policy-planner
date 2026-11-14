@@ -216,3 +216,77 @@ def test_to_public_shape_is_stable():
     keys = set(rewrite.RewriteResult("q").to_public())
     assert keys == {"standalone_query", "expanded_terms", "applied",
                     "attempted", "reason", "model", "latency_ms"}
+
+
+# --- 降级兜底：纯指代追问（B-11 的另一半） ---------------------------------
+
+HISTORY = [
+    {"role": "user", "content": "图书馆的书逾期了怎么收费？"},
+    {"role": "assistant", "content": "按每册每天 0.1 元收取逾期费。"},
+]
+
+
+def test_pronoun_fallback_stitches_the_previous_question():
+    """降级时没有模型改写，"那它要多久"必须靠上一轮问题才检索得动。"""
+    stitched = rewrite.resolve_pronoun_query("那它要多久？", HISTORY)
+    assert stitched is not None
+    assert stitched.startswith("图书馆的书逾期了怎么收费？")
+    assert "那它要多久" in stitched
+
+
+def test_pronoun_fallback_does_not_fire_when_a_topic_word_is_present():
+    """用户自己说了主题词就不拼——R3 否定"无脑拼接"的理由在这里仍然成立。"""
+    assert rewrite.resolve_pronoun_query("图书馆逾期费要多久？", HISTORY) is None
+
+
+def test_pronoun_fallback_needs_history():
+    assert rewrite.resolve_pronoun_query("那它要多久？", []) is None
+    assert rewrite.resolve_pronoun_query("那它要多久？", None) is None
+
+
+def test_pronoun_fallback_ignores_a_history_without_topic():
+    """上一轮也只有指代（连续"那它呢"），再拼一次没有意义。"""
+    assert rewrite.resolve_pronoun_query("那它呢？", [{"role": "user", "content": "那它呢？"}]) is None
+
+
+def test_pronoun_fallback_trims_the_previous_question_not_the_current_one():
+    """超长时裁的是上一轮，不是当前追问——否则轨迹里看不到用户最后问了什么。"""
+    long_previous = "申请国家励志奖学金需要提交哪些材料" * 10 + "？"
+    stitched = rewrite.resolve_pronoun_query(
+        "那它要多久？", [{"role": "user", "content": long_previous}])
+    assert stitched is not None
+    assert len(stitched) <= rewrite.PRONOUN_QUERY_MAX_CHARS
+    assert stitched.endswith("那它要多久？")
+    assert not stitched.startswith(long_previous)     # 上一轮被裁过
+
+
+def test_pronoun_fallback_gives_up_when_the_question_alone_is_too_long():
+    """追问本身超长就退回改前行为（不拼），不制造一种看起来更努力的新错法。"""
+    assert rewrite.resolve_pronoun_query("那它" + "呢" * 200, HISTORY) is None
+
+
+def test_degraded_pronoun_follow_up_is_not_refused(
+        client, student_headers, seeded_policy, app):
+    """整条链路：无 Key 时首问降级返回片段，追问"那它要多久"不该在检索层被判不相关。
+
+    这是 B-11 的另一半。改前：`那它要多久` 分词后一个主题词都没有 → 零命中 → 4001。
+    改后：用上一轮问题拼出可检索的问句 → 检索通过 → 仍是 4006（没有模型，只回原文）。
+    """
+    assert app.extensions["settings"].llm_api_key == "", "这个用例要跑在降级模式下"
+    first = client.post("/api/v1/qa/ask", headers=student_headers,
+                        json={"question": "申请国家励志奖学金需要提交哪些材料？"}).get_json()
+    assert first["code"] == 4006, first          # 降级：只回原文片段
+    conversation_id = first["data"]["conversation_id"]
+
+    second = client.post("/api/v1/qa/ask", headers=student_headers,
+                         json={"question": "那它要多久？",
+                               "conversation_id": conversation_id}).get_json()
+    assert second["code"] == 4006, second  # 追问不该在检索层就被判成主题不相关
+    node = next(n for n in second["data"]["workflow"]["nodes"]
+                if n["node"] == "retrieval")
+    detail = node["detail"]
+    assert detail["pronoun_fallback"]["applied"] is True
+    assert detail["pronoun_fallback"]["standalone"].startswith("申请国家励志奖学金")
+    # 摘要里也要能看见。初稿把这句话写在 summary 赋值之前，被后面的
+    # "命中 N 条，过闸 M 条"整句覆盖——detail 有值，人读摘要却看不出兜底生效。
+    assert "补全指代" in node["summary"], node["summary"]

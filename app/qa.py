@@ -600,9 +600,20 @@ def _run_pipeline(question: str, *, user, conversation_id: str | None,
         rewritten = rewrite.rewrite_query(question, history)
         node.model_calls = 1 if rewritten.attempted else 0
 
+        # **降级兜底**：改写没生效（无 Key / 超时 / 输出非法）而这一问又是纯指代时，
+        # 用上一轮问题把它拼成可检索的问句。确定性规则，不花模型钱。
+        # 只在这一问"一个主题词都没有"时触发——那种情况下不拼就是必然拒答，
+        # 所以不存在 R3 担心的"拼接把话题带偏"（见 rewrite.resolve_pronoun_query）。
+        standalone = rewritten.query
+        pronoun = None
+        if not rewritten.applied:
+            pronoun = rewrite.resolve_pronoun_query(question, history)
+            if pronoun:
+                standalone = pronoun
+
         outcome = retrieve(
             question, top_k=top_k, document_ids=scope_document_ids,
-            standalone_query=rewritten.query, expanded_terms=rewritten.expanded_terms,
+            standalone_query=standalone, expanded_terms=rewritten.expanded_terms,
         )
         node.summary = (
             f"命中 {outcome.total_hits} 条，过闸 {len(outcome.candidates)} 条"
@@ -610,6 +621,10 @@ def _run_pipeline(question: str, *, user, conversation_id: str | None,
         )
         if rewritten.applied:
             node.summary += "；已改写查询"
+        if pronoun:
+            # 必须写在 summary 组完之后：上面那行会覆盖先前赋的值，
+            # 先写再被盖掉，等于这句话从没出现过（这一版初稿就是这么错的）。
+            node.summary += "；改写未生效，已用上一轮问题补全指代"
         if outcome.anchor:
             # 点名文件是**确定性**的一步，与改写成败无关：降级模式下也生效，
             # 所以轨迹里必须单独记一条，否则评审会以为是改写把版本认对了。
@@ -628,6 +643,8 @@ def _run_pipeline(question: str, *, user, conversation_id: str | None,
             "standalone_query": outcome.standalone_query,
             "expanded_terms": list(outcome.expanded_terms),
             "rewrite": rewritten.to_public(),
+            # 降级兜底有没有生效、拼成了什么：轨迹里要能解释"这轮没模型怎么还能检索"
+            "pronoun_fallback": {"applied": bool(pronoun), "standalone": pronoun},
             # 点名的是哪份文件、摘掉书名号后的问法、闸门是否适用
             "anchor": outcome.anchor,
             "anchor_gate": outcome.anchor_gate,
