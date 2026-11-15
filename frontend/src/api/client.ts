@@ -684,3 +684,115 @@ export interface TaskStats {
   plans: Record<string, number>
   generated_at: string
 }
+
+/* ============================================================
+   校园事务指南（R12）
+   指南没有自己的表：`document` 与 `blocks` 都是后端按请求从
+   documents / document_chunks 里现取的，所以这里只描述形状。
+   ============================================================ */
+
+export interface GuideCategory {
+  id: string
+  label: string
+  description: string
+  /** 分类级覆盖说明（如"就业类政策尚未收录"），没有就是 null */
+  note: string | null
+  /** 编目条数 */
+  item_count: number
+  /** 其中有政策依据的条数 */
+  available_count: number
+  /** 一条政策都没有：前端显示空状态而不是编出来的卡片 */
+  empty: boolean
+  document_count: number
+}
+
+export interface GuideDocument {
+  id: string
+  title: string
+  effective_status: string
+  academic_year: string | null
+  version_label: string | null
+  department: string | null
+  published_at: string | null
+  parse_status: string
+  chunk_count: number
+  /** 已被替代时指向替代它的现行版本 */
+  superseded_by: { id: string; title: string } | null
+}
+
+export interface GuideAudience {
+  text: string
+  /** policy = 原文里的适用条款；rules = 已复核规则的奖项标签 */
+  source: 'policy' | 'rules'
+  section: string | null
+}
+
+export interface GuideBlock {
+  field: 'conditions' | 'materials' | 'steps'
+  label: string
+  section: string
+  page: number | null
+  article: string | null
+  text: string
+}
+
+export interface GuideAvailability {
+  available: boolean
+  document_id: string | null
+  reason: string | null
+  approved_condition_rules?: number
+  approved_rules?: number
+}
+
+export interface GuideActions {
+  ask: { question: string; document_id: string | null }
+  match: GuideAvailability
+  plan: GuideAvailability
+}
+
+export interface GuideCard {
+  key: string
+  category: string
+  category_label: string
+  title: string
+  summary: string
+  keywords: string[]
+  recommended: boolean
+  /** ok = 已收录；missing_policy = 暂未收录相关政策；no_text = 文件无可解析正文 */
+  availability: 'ok' | 'missing_policy' | 'no_text'
+  availability_label: string
+  audience: GuideAudience | null
+  document: GuideDocument | null
+  conditions_preview: string
+  /** 卡片上的三行摘要：条件 / 材料 / 流程，都截断到一两行 */
+  materials_preview: string
+  steps_preview: string
+  match_available: boolean
+  plan_available: boolean
+}
+
+export interface GuideDetail
+  extends Omit<GuideCard, 'conditions_preview' | 'materials_preview' | 'steps_preview'> {
+  blocks: GuideBlock[]
+  faq: string[]
+  /** 与上文章节同源、因此没有重复展示的字段（如 steps） */
+  duplicate_fields: string[]
+  actions: GuideActions
+  coverage: { sections_found: number; sections_expected: number }
+  related: GuideCard[]
+  source_note: string
+}
+
+export interface GuideOverview {
+  categories: GuideCategory[]
+  recommended: GuideCard[]
+  stats: {
+    category_count: number
+    item_count: number
+    available_count: number
+    missing_count: number
+    empty_category_count: number
+    document_count: number
+  }
+  notice: string
+}

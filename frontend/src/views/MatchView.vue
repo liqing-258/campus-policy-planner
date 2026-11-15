@@ -10,6 +10,7 @@
  * 而且能追溯到政策原文的那一条。所以这一页不会出现"AI 判断"字样。
  */
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   ApiError,
   api,
@@ -59,6 +60,8 @@ const noticeGroups = ref<string[]>([])
  * 前提是 store 的 `restore()` 用 `Object.assign` 原地改而不是整体替换。
  */
 const match = useMatchStore()
+// 从「校园事务指南」的「进行资格匹配」跳进来时，URL 上带着要匹配的文件
+const route = useRoute()
 /**
  * **必须在注册 `watch(documentId)` 之前同步恢复。**
  *
@@ -515,6 +518,15 @@ const groups = computed(() =>
  */
 onMounted(async () => {
   await loadDocuments()
+
+  // 指南跳过来的 ?document_id= 在列表加载完之后再套用：
+  // 只有那份文件确实在"可匹配列表"里才覆盖默认选择，否则下拉框会显示成空白
+  // （select 的 value 指向一个不存在的 option）。
+  const fromQuery = typeof route.query.document_id === 'string' ? route.query.document_id : ''
+  if (fromQuery && documents.value.some((doc) => doc.id === fromQuery)) {
+    match.documentId = fromQuery
+    match.persist()
+  }
 })
 
 // 换文件必须清空奖项：上一份文件里的「励志奖学金」在这份文件里可能根本不存在，

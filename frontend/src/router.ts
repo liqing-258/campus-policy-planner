@@ -5,6 +5,8 @@ import LoginView from './views/LoginView.vue'
 import DashboardView from './views/DashboardView.vue'
 import LibraryView from './views/LibraryView.vue'
 import AskView from './views/AskView.vue'
+import GuideView from './views/GuideView.vue'
+import GuideDetailView from './views/GuideDetailView.vue'
 import MatchView from './views/MatchView.vue'
 import PlansView from './views/PlansView.vue'
 import RulesView from './views/RulesView.vue'
@@ -31,6 +33,14 @@ const router = createRouter({
     },
     { path: '/', name: 'dashboard', component: DashboardView, meta: { title: '工作台' } },
     { path: '/library', name: 'library', component: LibraryView, meta: { title: '政策知识库' } },
+    // 指南是 R12 新增的"先浏览、再办事"入口：正文实时取自知识库，不是另建的库
+    { path: '/guides', name: 'guides', component: GuideView, meta: { title: '校园事务指南' } },
+    {
+      path: '/guides/:key',
+      name: 'guide-detail',
+      component: GuideDetailView,
+      meta: { title: '事项详情' },
+    },
     { path: '/ask', name: 'ask', component: AskView, meta: { title: '智能问答' } },
     { path: '/match', name: 'match', component: MatchView, meta: { title: '资格匹配' } },
     { path: '/plans', name: 'plans', component: PlansView, meta: { title: '计划与任务' } },

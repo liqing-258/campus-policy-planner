@@ -657,6 +657,16 @@ function goAction(action: string) {
 onMounted(async () => {
   await loadConversations()
   await restoreSession()
+
+  // 从「校园事务指南」带 ?q= 跳进来：把问题填进输入框并聚焦，**不自动发送**。
+  // 用户常要改一两个词（把"申请"换成"补办"），自动发送会把这次修改机会吃掉；
+  // 而只填不发，最差也只是他多按一次回车。
+  const prefill = typeof route.query.q === 'string' ? route.query.q.trim() : ''
+  if (prefill) {
+    question.value = prefill
+    await nextTick()
+    inputRef.value?.focus()
+  }
 })
 
 /**

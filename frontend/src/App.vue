@@ -92,6 +92,9 @@ const navGroups = computed(() => {
       title: '事务办理',
       items: [
         { to: '/', label: '工作台', icon: '▤' },
+        // 指南排在问答之前：先能自己看懂"该办什么、带什么"，
+        // 再决定要不要问 AI，顺序与学生的实际路径一致
+        { to: '/guides', label: '校园事务指南', icon: '▦' },
         { to: '/ask', label: '智能问答', icon: '?' },
         { to: '/match', label: '资格匹配', icon: '◎' },
         { to: '/plans', label: '计划与任务', icon: '☑' },
