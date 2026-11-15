@@ -126,6 +126,21 @@ const today = computed(() =>
   new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }),
 )
 
+/** 欢迎区的一行服务提示：学生与管理员看到的不一样，但都只说"能做什么"，不写建设进度。 */
+const serviceHint = computed(() =>
+  auth.isAdmin
+    ? '管理员视图：可维护政策库、复核规则、处理用户反馈。'
+    : '政策、指南、匹配、日历四件事都能从这里开始，先看指南再办事更稳妥。',
+)
+
+/** 四个快捷入口：问答 / 匹配 / 指南 / 日历，图标沿用左侧导航同一套，不另起炉灶。 */
+const quickActions = [
+  { to: '/ask', icon: '?', title: '智能政策问答', desc: '带引用、会拒答' },
+  { to: '/match', icon: '◎', title: '资格条件匹配', desc: '三态判定、不猜' },
+  { to: '/guides', icon: '▦', title: '校园事务指南', desc: '先看条件再办事' },
+  { to: '/calendar', icon: '▩', title: '我的校园日历', desc: '日程与待办同步' },
+]
+
 const overdueTone = computed(() => ((stats.value?.overdue ?? 0) > 0 ? 'danger' : 'ok'))
 
 /** 工作台上的日程：逾期 + 未来 7 天 + 待确认年份三类，都来自 /calendar/agenda */
@@ -172,13 +187,29 @@ function goCalendar(item: CalendarItem) {
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h2>{{ greeting }}，{{ auth.displayName }}</h2>
-      <span class="sub">{{ today }}</span>
-      <div class="tail">
+    <!-- 欢迎区：问候 + 日期 + 角色差异化服务提示 -->
+    <div class="hero">
+      <div class="hero-text">
+        <h2>{{ greeting }}，{{ auth.displayName }}</h2>
+        <p class="sub">{{ today }}</p>
+        <p class="hero-hint">{{ serviceHint }}</p>
+      </div>
+      <div class="hero-actions">
         <router-link class="btn btn-sm" to="/ask">提个问题</router-link>
         <router-link class="btn btn-sm btn-ghost" to="/match">查申请资格</router-link>
       </div>
+    </div>
+
+    <!-- 快捷操作区：四个高频入口，一眼找到"从哪开始" -->
+    <div class="quick-actions">
+      <router-link v-for="q in quickActions" :key="q.to" :to="q.to" class="quick-card">
+        <span class="quick-icon">{{ q.icon }}</span>
+        <span class="quick-text">
+          <strong>{{ q.title }}</strong>
+          <small>{{ q.desc }}</small>
+        </span>
+        <span class="quick-arrow" aria-hidden="true">→</span>
+      </router-link>
     </div>
 
     <p v-if="error" class="err-line">{{ error }}</p>
@@ -536,6 +567,125 @@ function goCalendar(item: CalendarItem) {
 .grow {
   flex: 1;
   min-width: 0;
+}
+
+/* ---------- 欢迎区（R18） ---------- */
+.hero {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-2) 0 var(--space-1);
+}
+
+.hero-text {
+  min-width: 0;
+}
+
+.hero-text h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.hero-hint {
+  margin: var(--space-1) 0 0;
+  color: var(--c-text-2);
+  font-size: 12.5px;
+}
+
+.hero-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ---------- 快捷操作区（R18） ---------- */
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.quick-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  color: var(--c-text);
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.quick-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--c-primary-border);
+  box-shadow: var(--shadow-pop);
+}
+
+.quick-icon {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  background: var(--c-primary-weak);
+  color: var(--c-primary);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.quick-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.quick-text strong {
+  font-size: 13.5px;
+  color: var(--c-text);
+}
+
+.quick-text small {
+  font-size: 11.5px;
+  color: var(--c-text-2);
+}
+
+.quick-arrow {
+  flex: none;
+  color: var(--c-dim);
+  font-size: 13px;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.quick-card:hover .quick-arrow {
+  opacity: 1;
+  transform: none;
+}
+
+@media (max-width: 1100px) {
+  .quick-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .quick-actions {
+    grid-template-columns: 1fr;
+  }
+  .hero-actions {
+    margin-left: 0;
+  }
 }
 
 .bar-foot {

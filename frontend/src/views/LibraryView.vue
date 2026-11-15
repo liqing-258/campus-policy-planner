@@ -40,6 +40,11 @@ const statusFilter = ref('')
 const loading = ref(false)
 const error = ref('')
 
+/* R18：知识库概览——四个数都来自真实接口（/documents 全量），前端不自己猜 */
+const overview = ref({ total: 0, parsed: 0, chunks: 0, pending: 0 })
+// 「已成功解析」= 已切分/已索引/已解析；「待处理」= 上传后还没走到解析完成的状态
+const READY_STATUSES = ['indexed', 'chunked', 'parsed']
+
 const chunks = ref<ChunkRow[]>([])
 const chunkTotal = ref(0)
 const openDocId = ref('')
@@ -140,6 +145,22 @@ async function loadDocs() {
     error.value = err instanceof Error ? err.message : '加载失败'
   } finally {
     loading.value = false
+  }
+}
+
+/** 顶部概览：拉一次全量列表（page_size 上限 100，演示库远小于此）算四个数。 */
+async function loadOverview() {
+  try {
+    const all = await api.get<Paged<DocumentRow>>('/documents?page=1&page_size=100')
+    const list = all.items
+    overview.value = {
+      total: all.total,
+      parsed: list.filter((d) => READY_STATUSES.includes(d.parse_status)).length,
+      chunks: list.reduce((sum, d) => sum + (d.chunk_count || 0), 0),
+      pending: list.filter((d) => !READY_STATUSES.includes(d.parse_status)).length,
+    }
+  } catch {
+    // 概览失败不阻断列表：列表自己会报错
   }
 }
 
@@ -386,6 +407,7 @@ onMounted(async () => {
     return
   }
   await loadDocs()
+  void loadOverview()
 })
 watch([page, statusFilter], loadDocs)
 watch(() => route.query.doc, openFromQuery)
@@ -417,6 +439,30 @@ function search() {
         <button class="btn btn-ghost" @click="search">搜索</button>
       </div>
     </header>
+
+    <!-- R18 知识库概览：四个数都来自 /documents 全量，不是前端拍脑袋 -->
+    <div class="grid grid-4 overview-grid">
+      <div class="stat accent">
+        <span class="k">文件总数</span>
+        <span class="v">{{ overview.total }}<small>份</small></span>
+        <span class="d">知识库已收录</span>
+      </div>
+      <div class="stat ok">
+        <span class="k">已成功解析</span>
+        <span class="v">{{ overview.parsed }}<small>份</small></span>
+        <span class="d">能检索到正文</span>
+      </div>
+      <div class="stat info">
+        <span class="k">知识片段</span>
+        <span class="v">{{ overview.chunks }}<small>个</small></span>
+        <span class="d">问答与匹配的证据</span>
+      </div>
+      <div class="stat" :class="overview.pending > 0 ? 'warn' : ''">
+        <span class="k">待处理</span>
+        <span class="v">{{ overview.pending }}<small>份</small></span>
+        <span class="d">{{ overview.pending > 0 ? '需关注解析状态' : '暂无待处理' }}</span>
+      </div>
+    </div>
 
     <section v-if="auth.isAdmin" class="card upload-card">
       <h3>上传政策文件</h3>

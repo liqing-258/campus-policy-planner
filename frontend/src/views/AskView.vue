@@ -944,11 +944,22 @@ onBeforeUnmount(() => {
           -->
           <details v-if="workflow" class="trace-box">
             <summary>
-              <span>处理过程</span>
-              <span class="muted tiny">
-                {{ workflow.executed_count }} / {{ workflow.node_count }} 个节点执行 ·
-                共 {{ workflow.total_ms }} ms · 模型调用 {{ workflow.model_calls }} 次
-                <template v-if="workflow.outcome"> · {{ RUN_OUTCOME_LABEL[workflow.outcome] ?? workflow.outcome }}</template>
+              <span class="trace-title">处理过程</span>
+              <!-- R18 横向步骤条：六个节点一眼看全，状态色区分完成/跳过/失败 -->
+              <span class="trace-steps">
+                <span
+                  v-for="node in workflow.nodes"
+                  :key="node.node"
+                  :title="`${node.label}：${nodeStatus(node.status).label}${node.status !== 'skipped' ? ' · ' + node.ms + 'ms' : ''}`"
+                  :class="['trace-step', nodeStatus(node.status).tone]"
+                >
+                  <i class="trace-dot" />
+                  {{ node.label }}
+                </span>
+              </span>
+              <span class="trace-meta">
+                {{ workflow.executed_count }}/{{ workflow.node_count }} 节点 · {{ workflow.total_ms }}ms
+                <template v-if="workflow.model_calls > 0"> · 模型调用 {{ workflow.model_calls }} 次</template>
               </span>
             </summary>
             <p class="trace-line mono">
@@ -1650,11 +1661,74 @@ onBeforeUnmount(() => {
 
 .trace-box summary {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-3);
   cursor: pointer;
   font-size: 13px;
   flex-wrap: wrap;
+}
+
+/* R18 横向步骤条：六个节点连成一条，状态色区分 */
+.trace-title {
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.trace-steps {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.trace-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--c-dim);
+}
+
+.trace-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c-border-strong);
+}
+
+.trace-step.met {
+  color: var(--c-met);
+}
+.trace-step.met .trace-dot {
+  background: var(--c-met);
+}
+
+.trace-step.unknown {
+  color: var(--c-unknown);
+}
+.trace-step.unknown .trace-dot {
+  background: var(--c-unknown);
+}
+
+.trace-step.not_met {
+  color: var(--c-not-met);
+}
+.trace-step.not_met .trace-dot {
+  background: var(--c-not-met);
+}
+
+/* 未执行（skipped）保持灰：把没执行画成"完成"是在骗人 */
+.trace-step.plain {
+  color: var(--c-dim);
+}
+.trace-step.plain .trace-dot {
+  background: var(--c-border-strong);
+}
+
+.trace-meta {
+  margin-left: auto;
+  color: var(--c-text-2);
+  font-size: 11.5px;
 }
 
 /* R8：展开只有这一行。原来这里是 6 张卡片 + 6 条摘要 + 一段说明。 */

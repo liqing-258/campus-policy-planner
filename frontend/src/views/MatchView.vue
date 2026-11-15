@@ -100,6 +100,8 @@ type Field = {
   integer?: boolean
   /** 枚举字段用下拉，避免用户照着英文枚举值猜怎么写 */
   options?: { value: string; label: string }[]
+  /** R18：画像分组——按业务含义归类，表单不再平铺九格 */
+  group?: string
 }
 
 /**
@@ -120,6 +122,7 @@ const fields: Field[] = [
     label: '学生类型',
     hint: '',
     type: 'select',
+    group: 'enrollment',
     options: [
       { value: '全日制在校本科生', label: '全日制在校本科生' },
       { value: '全日制在校专科生', label: '全日制在校专科生' },
@@ -136,17 +139,19 @@ const fields: Field[] = [
     // hint 在模板里由 hintOf() 动态拼：上限随学生类型走（专科 1–3 / 本科 1–4 / 其余 1–8）
     hint: '',
     type: 'number',
+    group: 'enrollment',
     // 年级只有整数：`2.5 年级`没有任何含义，小数点在输入时就被抹掉
     integer: true,
     min: GRADE_MIN,
     // 不写 max：它是动态的，见 boundsOf()
   },
-  { key: 'gpa', label: '平均学分绩点', hint: '0–5，如 3.2', type: 'number', min: 0, max: 5 },
+  { key: 'gpa', label: '平均学分绩点', hint: '0–5，如 3.2', type: 'number', group: 'academic', min: 0, max: 5 },
   {
     key: 'rank_percent',
     label: '专业排名百分比',
     hint: '0–100，越小越靠前',
     type: 'number',
+    group: 'ranking',
     min: 0,
     max: 100,
   },
@@ -155,6 +160,7 @@ const fields: Field[] = [
     label: '家庭经济困难认定',
     hint: '',
     type: 'select',
+    group: 'other',
     options: [
       { value: 'yes', label: '已认定' },
       { value: 'no', label: '未认定' },
@@ -165,17 +171,19 @@ const fields: Field[] = [
     label: '纪律处分记录',
     hint: '',
     type: 'select',
+    group: 'other',
     options: [
       { value: 'none', label: '无' },
       { value: 'any', label: '有' },
     ],
   },
-  { key: 'major', label: '专业', hint: '如：物联网工程', type: 'text' },
+  { key: 'major', label: '专业', hint: '如：物联网工程', type: 'text', group: 'other' },
   {
     key: 'credits_earned',
     label: '已修学分',
     hint: '0–300，如 120',
     type: 'number',
+    group: 'academic',
     min: 0,
     max: 300,
   },
@@ -184,6 +192,7 @@ const fields: Field[] = [
     label: '学籍状态',
     hint: '',
     type: 'select',
+    group: 'enrollment',
     options: [
       { value: 'enrolled', label: '在籍在读' },
       { value: 'suspended', label: '休学' },
@@ -191,6 +200,27 @@ const fields: Field[] = [
     ],
   },
 ]
+
+/** R18：画像分组元数据——四组按业务含义归类，顺序即展示顺序。 */
+const FIELD_GROUPS = [
+  { id: 'enrollment', label: '学籍基本信息' },
+  { id: 'academic', label: '学业成绩信息' },
+  { id: 'ranking', label: '专业排名信息' },
+  { id: 'other', label: '其他资格信息' },
+]
+
+/** 每个分组下的字段，保持 fields 里的原始顺序；空分组不渲染。 */
+const fieldsByGroup = computed(() =>
+  FIELD_GROUPS.map((g) => ({
+    ...g,
+    fields: fields.filter((f) => f.group === g.id),
+  })).filter((g) => g.fields.length > 0),
+)
+
+/** 已填写字段数（非空字符串才算填了），用于"还差哪些"的进度提示。 */
+const filledCount = computed(() =>
+  fields.filter((f) => String(profile[f.key] ?? '').trim() !== '').length,
+)
 
 async function loadDocuments() {
   try {
@@ -620,8 +650,19 @@ watch(
 
       <h3 class="sub">我的画像</h3>
       <p class="muted tiny">全部选填。留空的字段会变成「缺少信息」而不是「不符合」——两者含义完全不同。</p>
-      <div class="profile-grid">
-        <label v-for="f in fields" :key="f.key" class="field">
+      <!-- R18：填写进度——一眼看出还差哪几项，而不是扫完九格才意识到漏了 -->
+      <div class="fill-hint">
+        <span class="fill-track">
+          <span class="fill-fill" :style="{ width: `${Math.round((filledCount / fields.length) * 100)}%` }" />
+        </span>
+        <span class="muted tiny">
+          已填写 {{ filledCount }} / {{ fields.length }} 项<template v-if="fields.length - filledCount">，还有 {{ fields.length - filledCount }} 项未填</template>
+        </span>
+      </div>
+      <div v-for="g in fieldsByGroup" :key="g.id" class="field-group">
+        <h4 class="group-label">{{ g.label }}</h4>
+        <div class="profile-grid">
+          <label v-for="f in g.fields" :key="f.key" class="field">
           <span>{{ f.label }}</span>
           <select v-if="f.options" v-model="profile[f.key]" class="select">
             <option value="">未填写</option>
@@ -664,10 +705,11 @@ watch(
           />
           <input v-else v-model="profile[f.key]" type="text" :placeholder="hintOf(f)" />
         </label>
+        </div>
       </div>
 
       <p class="muted tiny">
-        年级的可选范围随学生类型变化：全日制在校专科生 1–{{ GRADE_MAX_BY_TYPE['全日制在校专科生'] }}，
+        年级的可选范围随学生类型变化：全日制在校专科生 1–{{ GRADE_MAX_BY_TYPE['全日制在校专科生'] }},
         全日制在校本科生 1–{{ GRADE_MAX_BY_TYPE['全日制在校本科生'] }}，其他类型 1–8。
         超出范围会取最近的边界值（输 9 得 4，输 0 得 1），输入框不接受加减号与小数点。
       </p>
@@ -925,6 +967,46 @@ watch(
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: var(--space-3);
   margin-top: var(--space-3);
+}
+
+/* ---------- R18：画像分组 + 填写进度 ---------- */
+.field-group {
+  margin-top: var(--space-4);
+}
+
+.group-label {
+  margin: 0 0 var(--space-1);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c-text-2);
+}
+
+.field-group .profile-grid {
+  margin-top: var(--space-1);
+}
+
+.fill-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.fill-track {
+  flex: 1;
+  max-width: 260px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--c-surface-2);
+  overflow: hidden;
+}
+
+.fill-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--c-primary);
+  transition: width 0.3s ease;
 }
 
 /* 数值字段是 text + inputmode="decimal"，所以原生上下箭头压根不存在——
