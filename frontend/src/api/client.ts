@@ -654,7 +654,7 @@ export interface MessageRow {
   /** 这条答案对应的运行记录；为空表示历史数据或降级前的记录 */
   workflow_run_id: string | null
   /** 我对这条答案的反馈（没评过就是 null） */
-  feedback: { helpful: boolean; reason_code: string | null } | null
+  feedback: { helpful: boolean; reason_code: string | null; comment: string | null } | null
   created_at: string | null
 }
 
@@ -663,6 +663,7 @@ export type FeedbackReason =
   | 'missing_citation'
   | 'outdated_policy'
   | 'too_vague'
+  | 'irrelevant'
   | 'other'
 
 export interface FeedbackResult {
@@ -1118,4 +1119,60 @@ export interface MatchVersionNote {
   newest_document_id: string
   versions: VersionBrief[]
   hint: string
+}
+
+/* ============================================================
+   办事评价与纠错反馈（R16）
+   纠错反馈是另一张表（correction_feedback），因为 qa_feedback 的
+   message_id 是 NOT NULL 外键，而「这份政策写错了」不指向任何 AI 消息。
+   管理员看到的是两类合并视图，公共字段同形、差异只在 context。
+   ============================================================ */
+
+export type CorrectionTarget = 'document' | 'guide' | 'match'
+
+export interface CorrectionSubmitResult {
+  feedback_id: string
+  target_type: CorrectionTarget
+  target_id: string
+  comment: string
+  reason_code: string | null
+  updated: boolean
+  created_at: string | null
+}
+
+export type FeedbackStatus = 'pending' | 'processing' | 'resolved'
+
+export interface AdminFeedbackItem {
+  kind: 'qa' | 'correction'
+  id: string
+  user: { id: string | null; display_name: string; username: string | null }
+  helpful: boolean | null
+  reason_code: string | null
+  comment: string | null
+  status: FeedbackStatus
+  admin_note: string | null
+  created_at: string | null
+  resolved_at: string | null
+  context: {
+    // qa 特有：关联问题 + AI 回答 + 引用片段
+    question?: string | null
+    answer?: string | null
+    model?: string | null
+    conversation_id?: string | null
+    citations?: { document_id: string; document_title: string; section_title: string | null; snippet: string }[]
+    // correction 特有：目标对象 + 政策文件
+    target_type?: string
+    target_id?: string
+    document?: { id: string; title: string; effective_status: string; department: string | null; academic_year: string | null; version_label: string | null } | null
+  }
+}
+
+export interface AdminFeedbackStats {
+  total: number
+  qa: { total: number; helpful: number; unhelpful: number; helpful_rate: number; unhelpful_rate: number }
+  correction_count: number
+  policy_error_count: number
+  reason_distribution: { reason_code: string; count: number }[]
+  status: { pending: number; processing: number; resolved: number }
+  generated_at: string
 }

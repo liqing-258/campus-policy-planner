@@ -161,11 +161,26 @@ export const RUN_STATUS_LABEL: Record<string, string> = {
 
 /** 反馈原因码 → 中文。与后端的 FEEDBACK_REASONS 一一对应。 */
 export const FEEDBACK_REASON_LABEL: Record<string, string> = {
-  wrong_fact: '事实写错了',
+  irrelevant: '回答与问题不相关',
+  wrong_fact: '政策依据不准确',
   missing_citation: '缺少可核对的引用',
-  outdated_policy: '引用了旧版政策',
-  too_vague: '回答太笼统',
-  other: '其他原因',
+  outdated_policy: '政策信息已经过期',
+  too_vague: '回答内容不完整',
+  other: '其他问题',
+}
+
+/** 反馈处理状态 → 中文。与后端 FEEDBACK_STATUSES 一一对应。 */
+export const FEEDBACK_STATUS_LABEL: Record<string, string> = {
+  pending: '待处理',
+  processing: '处理中',
+  resolved: '已解决',
+}
+
+/** 纠错反馈指向的对象类型 → 中文。与后端 CORRECTION_TARGETS 一一对应。 */
+export const CORRECTION_TARGET_LABEL: Record<string, string> = {
+  document: '政策文件',
+  guide: '校园事务指南',
+  match: '资格匹配结果',
 }
 
 /** 有效状态 → 中文 + 色调。版本冲突面板要用它标出"哪份现行有效"。 */
