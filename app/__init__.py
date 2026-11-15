@@ -56,6 +56,7 @@ def create_app(overrides: dict | None = None) -> Flask:
     from app import matching as matching_mod
     from app import plans as plans_mod
     from app import qa as qa_mod
+    from app import recommend as recommend_mod
     from app import rules as rules_mod
     from app import tasks as tasks_mod
     from app import workflows as workflows_mod
@@ -69,6 +70,9 @@ def create_app(overrides: dict | None = None) -> Flask:
     app.register_blueprint(qa_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(rules_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(matching_mod.bp, url_prefix=API_PREFIX)
+    # 政策推荐（R13）同样只读：画像取 match_sessions、条件取已复核规则、
+    # 原文取 document_chunks，推荐本身是纯函数，没有自己的表也不需要迁移
+    app.register_blueprint(recommend_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(plans_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(tasks_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(workflows_mod.bp, url_prefix=API_PREFIX)
