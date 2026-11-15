@@ -23,6 +23,7 @@ import {
 } from '../api/client'
 import { EFFECTIVE_LABEL } from '../utils/format'
 import CorrectionModal from '../components/CorrectionModal.vue'
+import FavoriteButton from '../components/FavoriteButton.vue'
 import GuideIcon from '../components/GuideIcon.vue'
 
 const route = useRoute()
@@ -238,8 +239,9 @@ watch(itemKey, load)
           </p>
           <button class="link as-btn tiny" @click="openPolicy">查看原文与片段 →</button>
         </div>
-        <!-- R16 纠错入口 -->
+        <!-- R16 纠错入口 + R17 收藏入口 -->
         <div class="correction-entry">
+          <FavoriteButton target-type="guide" :target-id="itemKey" />
           <button class="link as-btn tiny" @click="correctionOpen = true">报告此处有误</button>
         </div>
       </header>
@@ -410,6 +412,9 @@ watch(itemKey, load)
 <style scoped>
 .correction-entry {
   margin-top: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 .crumb {
   font-size: 12px;

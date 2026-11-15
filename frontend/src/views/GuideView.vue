@@ -15,6 +15,7 @@ import { useRouter } from 'vue-router'
 import { api, type GuideCard, type GuideCategory, type GuideOverview } from '../api/client'
 import { EFFECTIVE_LABEL } from '../utils/format'
 import GuideIcon from '../components/GuideIcon.vue'
+import FavoriteButton from '../components/FavoriteButton.vue'
 
 const router = useRouter()
 
@@ -307,6 +308,7 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
               <span v-if="item.match_available" class="tag info">可匹配</span>
               <span v-if="item.plan_available" class="tag info">可生成计划</span>
             </span>
+            <FavoriteButton target-type="guide" :target-id="item.key" />
           </div>
         </article>
       </div>

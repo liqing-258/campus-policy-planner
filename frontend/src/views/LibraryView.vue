@@ -18,6 +18,7 @@ import {
   type VersionCandidates,
 } from '../api/client'
 import CorrectionModal from '../components/CorrectionModal.vue'
+import FavoriteButton from '../components/FavoriteButton.vue'
 import { useAuthStore } from '../stores/auth'
 import {
   EFFECTIVE_LABEL,
@@ -584,6 +585,7 @@ function search() {
                   class="link danger"
                   @click="removeDoc(doc)"
                 >下架</button>
+                <FavoriteButton target-type="document" :target-id="doc.id" />
               </td>
             </tr>
             <tr v-if="editingId === doc.id" class="detail-row">
@@ -638,6 +640,12 @@ function search() {
                   >
                     查看新版本
                   </button>
+                </div>
+
+                <!-- R17 收藏入口：文件详情页也能直接收藏/取消 -->
+                <div class="detail-actions">
+                  <FavoriteButton target-type="document" :target-id="doc.id" />
+                  <span class="muted tiny">收藏后在「我的收藏」里随取随用。</span>
                 </div>
 
                 <!-- 基本信息（需求二.1 的八项） -->
@@ -1125,6 +1133,13 @@ function search() {
 }
 .correction-entry .link {
   font-size: 12.5px;
+}
+
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
 }
 
 .summary-block,

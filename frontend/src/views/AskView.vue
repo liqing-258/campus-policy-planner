@@ -70,6 +70,7 @@ import {
   nodeStatus,
 } from '../utils/format'
 import { fromServerMessage, useQAStore, type QAMessage } from '../stores/qa'
+import FavoriteButton from '../components/FavoriteButton.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -871,6 +872,11 @@ onBeforeUnmount(() => {
               </p>
             </div>
 
+            <!-- R17 收藏回答：收藏后保留原始回答与来源，不受后续政策更新影响 -->
+            <div class="fav-row">
+              <FavoriteButton target-type="qa" :target-id="answer.message_id" />
+            </div>
+
             <!-- 反馈 -->
             <div class="feedback">
               <span class="muted small">这条解答有用吗？</span>
@@ -1552,12 +1558,20 @@ onBeforeUnmount(() => {
   font-size: 12.5px;
 }
 
+/* ---------- 收藏回答（R17） ---------- */
+.fav-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
 /* ---------- 反馈 ---------- */
 .feedback {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-top: var(--space-4);
+  margin-top: var(--space-3);
   flex-wrap: wrap;
 }
 

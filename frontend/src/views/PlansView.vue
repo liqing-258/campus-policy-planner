@@ -15,6 +15,7 @@ import {
   formatDate,
   formatTime,
 } from '../utils/format'
+import FavoriteButton from '../components/FavoriteButton.vue'
 
 const route = useRoute()
 const plans = ref<PlanRow[]>([])
@@ -164,6 +165,7 @@ onMounted(loadPlans)
                 {{ PLAN_STATUS_LABEL[p.status] ?? p.status }}
               </span>
               <span class="muted tiny">{{ formatTime(p.created_at) }}</span>
+              <FavoriteButton target-type="plan" :target-id="p.id" />
             </div>
           </li>
         </ul>
