@@ -1,4 +1,4 @@
-"""ORM 模型：14 张表。
+"""ORM 模型：15 张表。
 
 字段与索引的唯一权威来源是 docs/20-系统设计/数据模型.md。
 本文件不写业务逻辑，只做结构映射；改字段前先改文档。
@@ -329,6 +329,46 @@ class QaFeedback(db.Model):
     helpful = db.Column(db.Integer, nullable=False)
     reason_code = db.Column(db.String(20))
     comment = db.Column(db.Text)
+    # R16：管理员处理状态。**老库加列**由 `ensure_columns()` 做幂等迁移——
+    # create_all() 不改已存在的表，这三列不在迁移里加，老库一查询就 no such column。
+    status = db.Column(db.String(16), nullable=False, default="pending")
+    admin_note = db.Column(db.Text)
+    resolved_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+
+# ------------------------------------------------- 3.12b correction_feedback
+class CorrectionFeedback(db.Model):
+    """纠错反馈（R16）：对政策文件 / 指南 / 匹配结果内容的纠错。
+
+    **为什么不用 qa_feedback**：qa_feedback 的 `message_id` 是 NOT NULL 外键，
+    而"这份政策的发布日期写错了"不指向任何一条 AI 消息。所以纠错反馈是另一张表，
+    用 `target_type + target_id` 定位被纠错的对象，`document_id` 关联到政策文件
+    （统计"政策错误反馈"与管理员跳转都靠它）。
+
+    **学生反馈不碰正式政策内容**：这张表只记录"谁、对什么、说了什么"，管理员
+    看完之后走既有的文档元数据接口 / 规则复核流程去改，本表没有任何写 documents /
+    policy_rules 的副作用——"未经核实的用户意见不得自动成为政策规则"由此成立。
+    """
+
+    __tablename__ = "correction_feedback"
+    __table_args__ = (
+        db.Index("idx_correction_target", "target_type", "target_id"),
+        db.Index("idx_correction_created", "created_at"),
+    )
+
+    id = db.Column(db.String(26), primary_key=True)
+    user_id = db.Column(db.String(26), db.ForeignKey("users.id"), nullable=False)
+    # document = 政策详情；guide = 校园事务指南事项；match = 资格匹配结果
+    target_type = db.Column(db.String(16), nullable=False)
+    target_id = db.Column(db.String(64), nullable=False)
+    document_id = db.Column(db.String(26), db.ForeignKey("documents.id"))
+    reason_code = db.Column(db.String(20))
+    comment = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(16), nullable=False, default="pending")
+    admin_note = db.Column(db.Text)
+    resolved_by = db.Column(db.String(26), db.ForeignKey("users.id"))
+    resolved_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
 
@@ -395,5 +435,39 @@ class CalendarEvent(db.Model):
 ALL_MODELS = (
     User, Document, DocumentChunk, Conversation, Message, PolicyRule,
     MatchSession, MatchResultItem, ActionPlan, Task, WorkflowRun,
-    QaFeedback, AuditLog, CalendarEvent,
+    QaFeedback, CorrectionFeedback, AuditLog, CalendarEvent,
 )
+
+
+# ------------------------------------------------------------ 轻量迁移（R16）
+def ensure_columns() -> list[str]:
+    """给老表幂等加列。create_all() 只建缺失的表、不改已存在的表，
+    所以 qa_feedback 的 R16 三列（status/admin_note/resolved_at）要在这里补。
+
+    用 `ALTER TABLE ... ADD COLUMN` 是因为 SQLite 对它完全支持且不碰既有行；
+    R14 拒绝给 tasks 加列是因为那是「改 NOT NULL 约束」要重建整张表，跟这里
+    不是一回事。返回实际加上的列名列表（空 = 已经是最新结构）。
+
+    调用方：`bootstrap.ensure_schema()`（演示/打包自动）与 `tools/init_db.py`
+    （开发手动），两个入口都调，保证任何启动路径都拿到新列。
+    """
+    from sqlalchemy import inspect, text
+
+    added: list[str] = []
+    inspector = inspect(db.engine)
+    if "qa_feedback" not in inspector.get_table_names():
+        return added
+
+    existing = {col["name"] for col in inspector.get_columns("qa_feedback")}
+    specs = (
+        ("status", "VARCHAR(16) NOT NULL DEFAULT 'pending'"),
+        ("admin_note", "TEXT"),
+        ("resolved_at", "DATETIME"),
+    )
+    for name, ddl in specs:
+        if name not in existing:
+            db.session.execute(text(f"ALTER TABLE qa_feedback ADD COLUMN {name} {ddl}"))
+            added.append(name)
+    if added:
+        db.session.commit()
+    return added

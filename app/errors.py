@@ -135,6 +135,10 @@ class MessageNotFound(ApiError):
 
 
 # ---------- R12：校园事务指南 ----------
+class FeedbackNotFound(ApiError):
+    code = codes.FEEDBACK_NOT_FOUND
+
+
 class GuideNotFound(ApiError):
     """指南事项 key 不存在。
 

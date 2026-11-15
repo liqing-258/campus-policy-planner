@@ -479,3 +479,50 @@ class CalendarEventPatchRequest(StrictModel):
         except ValueError:
             raise ValueError("date 不是合法日期（应为 YYYY-MM-DD）")
         return value
+
+
+# ---------------------------------------------------------------- R16：纠错反馈与反馈管理
+class CorrectionFeedbackRequest(StrictModel):
+    """对政策文件 / 指南 / 匹配结果的纠错反馈。
+
+    `comment` 必填：纠错不同于"有用/没用"的一键评价，不写清楚"哪里错、错成什么样"，
+    管理员无从核对。`reason_code` 可空（复用 FEEDBACK_REASONS，但纠错场景下并非
+    每条都能归进那六类，不强制）。
+    """
+
+    target_type: str
+    target_id: str = Field(min_length=1, max_length=64)
+    document_id: str | None = Field(default=None, max_length=26)
+    reason_code: str | None = Field(default=None, max_length=20)
+    comment: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("target_type")
+    @classmethod
+    def _target_type(cls, value):
+        from shared.enums import CORRECTION_TARGETS
+        return _check_in(value, CORRECTION_TARGETS, "纠错对象类型")
+
+    @field_validator("reason_code")
+    @classmethod
+    def _reason(cls, value):
+        from shared.enums import FEEDBACK_REASONS
+        return _check_in(value, FEEDBACK_REASONS, "原因码")
+
+
+class FeedbackAdminUpdateRequest(StrictModel):
+    """管理员更新反馈：改处理状态 + 写处理说明。字段全部可选，但至少要传一个。"""
+
+    status: str | None = None
+    admin_note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("status")
+    @classmethod
+    def _status(cls, value):
+        from shared.enums import FEEDBACK_STATUSES
+        return _check_in(value, FEEDBACK_STATUSES, "处理状态")
+
+    @model_validator(mode="after")
+    def _require_something(self):
+        if self.status is None and self.admin_note is None:
+            raise ValueError("status 与 admin_note 至少传一个")
+        return self
