@@ -22,6 +22,7 @@ import {
   type GuideDetail,
 } from '../api/client'
 import { EFFECTIVE_LABEL } from '../utils/format'
+import CorrectionModal from '../components/CorrectionModal.vue'
 import GuideIcon from '../components/GuideIcon.vue'
 
 const route = useRoute()
@@ -30,6 +31,8 @@ const router = useRouter()
 const detail = ref<GuideDetail | null>(null)
 const loading = ref(true)
 const error = ref('')
+// R16 纠错反馈：指南事项正文有误时上报（不改内容，只记反馈）
+const correctionOpen = ref(false)
 
 const draft = ref<DraftData | null>(null)
 const drafting = ref(false)
@@ -235,6 +238,10 @@ watch(itemKey, load)
           </p>
           <button class="link as-btn tiny" @click="openPolicy">查看原文与片段 →</button>
         </div>
+        <!-- R16 纠错入口 -->
+        <div class="correction-entry">
+          <button class="link as-btn tiny" @click="correctionOpen = true">报告此处有误</button>
+        </div>
       </header>
 
       <div class="detail-grid">
@@ -386,10 +393,24 @@ watch(itemKey, load)
         </aside>
       </div>
     </template>
+
+    <!-- R16 纠错反馈弹层：校园事务指南事项 -->
+    <CorrectionModal
+      v-if="detail"
+      :open="correctionOpen"
+      target-type="guide"
+      :target-id="itemKey"
+      :document-id="detail.document?.id ?? null"
+      :target-title="detail.title"
+      @close="correctionOpen = false"
+    />
   </div>
 </template>
 
 <style scoped>
+.correction-entry {
+  margin-top: var(--space-2);
+}
 .crumb {
   font-size: 12px;
   color: var(--c-dim);

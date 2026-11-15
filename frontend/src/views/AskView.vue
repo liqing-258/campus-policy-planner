@@ -116,7 +116,8 @@ const scroller = ref<HTMLElement | null>(null)
 // ---------- 反馈 ----------
 const ratingFor = ref('')
 const ratingReason = ref<FeedbackReason | ''>('')
-const feedbackSent = ref<Record<string, { helpful: boolean; reason_code: string | null }>>({})
+const ratingComment = ref('')
+const feedbackSent = ref<Record<string, { helpful: boolean; reason_code: string | null; comment: string | null }>>({})
 const feedbackBusy = ref(false)
 const feedbackError = ref('')
 
@@ -136,17 +137,21 @@ async function submitFeedback(messageId: string, helpful: boolean) {
       feedback_id: string
       helpful: boolean
       reason_code: string | null
+      comment: string | null
       updated: boolean
     }>(`/messages/${messageId}/feedback`, {
       helpful,
       reason_code: helpful ? null : ratingReason.value || null,
+      comment: ratingComment.value.trim() || null,
     })
     feedbackSent.value[messageId] = {
       helpful: result.helpful,
       reason_code: result.reason_code,
+      comment: result.comment,
     }
     ratingFor.value = ''
     ratingReason.value = ''
+    ratingComment.value = ''
   } catch (err) {
     feedbackError.value = err instanceof Error ? err.message : '反馈没提交成功'
   } finally {
@@ -177,6 +182,7 @@ async function ask(text?: string) {
   openPast.value = ''
   ratingFor.value = ''
   ratingReason.value = ''
+  ratingComment.value = ''
   feedbackError.value = ''
   // 新的一轮重新给建议：上一轮关掉的那栏，问完这一句又该出现了
   suggestClosed.value = false
@@ -875,6 +881,10 @@ onBeforeUnmount(() => {
                     · {{ FEEDBACK_REASON_LABEL[feedbackOf(answer.message_id)?.reason_code ?? ''] ?? '' }}
                   </template>
                 </span>
+                <span
+                  v-if="feedbackOf(answer.message_id)?.comment"
+                  class="muted tiny fb-comment"
+                >补充：{{ feedbackOf(answer.message_id)?.comment }}</span>
               </template>
               <template v-else>
                 <button class="chip tiny-chip" :disabled="feedbackBusy" @click="submitFeedback(answer.message_id, true)">
@@ -896,6 +906,13 @@ onBeforeUnmount(() => {
                   {{ FEEDBACK_REASON_LABEL[reason] }}
                 </option>
               </select>
+              <textarea
+                v-model="ratingComment"
+                class="input fb-textarea"
+                rows="2"
+                maxlength="500"
+                placeholder="可补充说明具体问题（选填）"
+              ></textarea>
               <button class="btn tiny-btn" :disabled="feedbackBusy || !ratingReason" @click="submitFeedback(answer.message_id, false)">
                 提交
               </button>
@@ -1550,6 +1567,18 @@ onBeforeUnmount(() => {
   margin-top: var(--space-2);
   align-items: center;
   flex-wrap: wrap;
+}
+
+.fb-textarea {
+  flex: 1 1 220px;
+  min-width: 200px;
+  padding: 6px 8px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.fb-comment {
+  flex-basis: 100%;
 }
 
 .select {

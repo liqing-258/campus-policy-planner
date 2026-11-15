@@ -17,6 +17,7 @@ import {
   type VersionBrief,
   type VersionCandidates,
 } from '../api/client'
+import CorrectionModal from '../components/CorrectionModal.vue'
 import { useAuthStore } from '../stores/auth'
 import {
   EFFECTIVE_LABEL,
@@ -54,6 +55,8 @@ const linkMsg = ref('')
 const linkError = ref('')
 // 相关文件 = 同发布部门的其他文件（真实关联；不做语义推荐）
 const relatedDocs = ref<DocumentRow[]>([])
+// R16 纠错反馈：详情页上的「报告此处有误」入口
+const correction = ref<{ open: boolean; doc: DocumentRow | null }>({ open: false, doc: null })
 
 const uploading = ref(false)
 const uploadMsg = ref('')
@@ -662,6 +665,14 @@ function search() {
                   </div>
                 </dl>
 
+                <!-- R16 纠错入口：学生指出这份政策哪里写错了（不改内容，只记反馈） -->
+                <div class="correction-entry">
+                  <button class="link" @click="correction = { open: true, doc }">
+                    报告此处有误
+                  </button>
+                  <span class="muted tiny">——发现政策内容有误？提交后管理员会核对。</span>
+                </div>
+
                 <!-- 政策摘要：scope_note + 原文开头。不是生成的摘要，
                      摘要写错了会变成"看起来很权威的假话" -->
                 <div class="summary-block">
@@ -787,6 +798,17 @@ function search() {
         <button class="btn btn-ghost" :disabled="page >= pages" @click="page++">下一页</button>
       </div>
     </section>
+
+    <!-- R16 纠错反馈弹层：政策详情 -->
+    <CorrectionModal
+      v-if="correction.doc"
+      :open="correction.open"
+      target-type="document"
+      :target-id="correction.doc.id"
+      :document-id="correction.doc.id"
+      :target-title="correction.doc.title"
+      @close="correction.open = false"
+    />
   </div>
 </template>
 
@@ -1093,6 +1115,16 @@ function search() {
   margin: 2px 0 0;
   font-size: 12.5px;
   overflow-wrap: anywhere;
+}
+
+.correction-entry {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+}
+.correction-entry .link {
+  font-size: 12.5px;
 }
 
 .summary-block,

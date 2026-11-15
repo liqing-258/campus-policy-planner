@@ -21,10 +21,35 @@
  * 而且四个的边框、字号、延迟迟早不一致。这里只用 `pointermove` + 一个 fixed 定位块。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { api, type PortraitsData, type PortraitBucket, type QaData } from '../api/client'
-import { formatTime } from '../utils/format'
+import {
+  api,
+  type AdminFeedbackItem,
+  type AdminFeedbackStats,
+  type FeedbackStatus,
+  type PortraitsData,
+  type PortraitBucket,
+  type QaData,
+} from '../api/client'
+import {
+  CORRECTION_TARGET_LABEL,
+  FEEDBACK_REASON_LABEL,
+  FEEDBACK_STATUS_LABEL,
+  formatTime,
+} from '../utils/format'
 
 const loading = ref(true)
+
+/* ---------------- R16 用户反馈管理 ---------------- */
+const fbStats = ref<AdminFeedbackStats | null>(null)
+const fbItems = ref<AdminFeedbackItem[]>([])
+const fbTotal = ref(0)
+const fbKind = ref<'all' | 'qa' | 'correction'>('all')
+const fbStatus = ref<'' | FeedbackStatus>('')
+const fbLoading = ref(false)
+const fbError = ref('')
+const fbExpanded = ref('')
+const fbNote = ref('')
+const fbSaving = ref(false)
 const error = ref('')
 const portraits = ref<PortraitsData | null>(null)
 const qa = ref<QaData | null>(null)
@@ -59,7 +84,86 @@ onMounted(async () => {
     error.value = failure.reason instanceof Error ? failure.reason.message : '数据加载失败'
   }
   loading.value = false
+  // 反馈管理：统计与列表各拉一次；列表带筛选，筛选项变化时再单独重拉
+  void loadFeedbackStats()
+  void loadFeedbackList()
 })
+
+async function loadFeedbackStats() {
+  try {
+    fbStats.value = await api.get<AdminFeedbackStats>('/admin/feedback/stats')
+  } catch {
+    fbStats.value = null
+  }
+}
+
+async function loadFeedbackList() {
+  fbLoading.value = true
+  fbError.value = ''
+  try {
+    const params = new URLSearchParams()
+    params.set('kind', fbKind.value)
+    if (fbStatus.value) params.set('status', fbStatus.value)
+    const data = await api.get<{ items: AdminFeedbackItem[]; total: number }>(
+      `/admin/feedback?${params.toString()}`,
+    )
+    fbItems.value = data.items
+    fbTotal.value = data.total
+  } catch (err) {
+    fbError.value = err instanceof Error ? err.message : '反馈加载失败'
+  } finally {
+    fbLoading.value = false
+  }
+}
+
+function applyFeedbackFilter() {
+  fbExpanded.value = ''
+  void loadFeedbackList()
+}
+
+function toggleFeedback(id: string) {
+  fbExpanded.value = fbExpanded.value === id ? '' : id
+  fbNote.value = ''
+}
+
+/** 更新处理状态；成功后刷新列表与统计（统计里的"已解决"要跟着变）。 */
+async function setFeedbackStatus(item: AdminFeedbackItem, status: FeedbackStatus) {
+  fbSaving.value = true
+  try {
+    await api.patch(`/admin/feedback/${item.kind}/${item.id}`, { status })
+    await Promise.all([loadFeedbackList(), loadFeedbackStats()])
+  } catch (err) {
+    fbError.value = err instanceof Error ? err.message : '状态更新失败'
+  } finally {
+    fbSaving.value = false
+  }
+}
+
+/** 只保存处理说明，不动状态。 */
+async function saveFeedbackNote(item: AdminFeedbackItem) {
+  fbSaving.value = true
+  try {
+    await api.patch(`/admin/feedback/${item.kind}/${item.id}`, {
+      admin_note: fbNote.value.trim(),
+    })
+    await loadFeedbackList()
+    fbNote.value = ''
+  } catch (err) {
+    fbError.value = err instanceof Error ? err.message : '处理说明保存失败'
+  } finally {
+    fbSaving.value = false
+  }
+}
+
+/** 反馈类型中文标签：qa=答案评价，correction=纠错反馈 */
+function feedbackKindLabel(kind: string): string {
+  return kind === 'qa' ? '答案评价' : '纠错反馈'
+}
+
+/** 处理状态色调：待处理=黄（醒目）、处理中=灰、已解决=绿 */
+function fbStatusTone(status: string): string {
+  return status === 'resolved' ? 'met' : status === 'processing' ? 'plain' : 'unknown'
+}
 
 onBeforeUnmount(() => {
   tip.value = null
@@ -577,6 +681,178 @@ function bucketLabel(bucket: PortraitBucket) {
       </p>
     </section>
 
+    <!-- ================= R16 用户反馈管理 ================= -->
+    <section class="card feedback-admin">
+      <div class="list-head">
+        <h3>用户反馈管理</h3>
+        <span class="muted tiny">共 {{ fbStats?.total ?? 0 }} 条反馈</span>
+      </div>
+
+      <!-- 统计卡：总数 / 有帮助比 / 没帮助比 / 政策错误 / 已解决 -->
+      <div v-if="fbStats" class="fb-stats">
+        <div class="fb-stat">
+          <span class="fb-num">{{ fbStats.total }}</span>
+          <span class="dim tiny">总反馈</span>
+        </div>
+        <div class="fb-stat">
+          <span class="fb-num">{{ Math.round(fbStats.qa.helpful_rate * 100) }}%</span>
+          <span class="dim tiny">有帮助</span>
+        </div>
+        <div class="fb-stat">
+          <span class="fb-num">{{ Math.round(fbStats.qa.unhelpful_rate * 100) }}%</span>
+          <span class="dim tiny">没帮助</span>
+        </div>
+        <div class="fb-stat">
+          <span class="fb-num">{{ fbStats.policy_error_count }}</span>
+          <span class="dim tiny">政策错误</span>
+        </div>
+        <div class="fb-stat">
+          <span class="fb-num">{{ fbStats.status.resolved }}</span>
+          <span class="dim tiny">已解决</span>
+        </div>
+      </div>
+
+      <!-- 高频问题类型 -->
+      <div v-if="fbStats && fbStats.reason_distribution.length" class="fb-reasons">
+        <span class="dim tiny">高频问题类型：</span>
+        <span
+          v-for="r in fbStats.reason_distribution.slice(0, 6)"
+          :key="r.reason_code"
+          class="tag plain"
+        >{{ FEEDBACK_REASON_LABEL[r.reason_code] ?? r.reason_code }} {{ r.count }}</span>
+      </div>
+
+      <!-- 筛选 -->
+      <div class="fb-toolbar">
+        <select v-model="fbKind" class="select" @change="applyFeedbackFilter">
+          <option value="all">全部类型</option>
+          <option value="qa">答案评价</option>
+          <option value="correction">纠错反馈</option>
+        </select>
+        <select v-model="fbStatus" class="select" @change="applyFeedbackFilter">
+          <option value="">全部状态</option>
+          <option value="pending">待处理</option>
+          <option value="processing">处理中</option>
+          <option value="resolved">已解决</option>
+        </select>
+        <span class="muted tiny">按提交时间排序（新在前），共 {{ fbTotal }} 条</span>
+      </div>
+
+      <p v-if="fbError" class="err-line">{{ fbError }}</p>
+
+      <div v-if="fbLoading" class="muted small">反馈加载中…</div>
+
+      <div v-else-if="fbItems.length" class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>类型</th>
+              <th>提交人</th>
+              <th>反馈内容</th>
+              <th>原因</th>
+              <th>状态</th>
+              <th>提交时间</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in fbItems" :key="item.kind + item.id">
+              <td><span class="tag plain">{{ feedbackKindLabel(item.kind) }}</span></td>
+              <td class="nowrap">{{ item.user.display_name }}</td>
+              <td class="fb-comment-cell">{{ item.comment }}</td>
+              <td class="nowrap">
+                {{ item.reason_code ? (FEEDBACK_REASON_LABEL[item.reason_code] ?? item.reason_code) : '—' }}
+              </td>
+              <td>
+                <span :class="['tag', fbStatusTone(item.status)]">
+                  {{ FEEDBACK_STATUS_LABEL[item.status] ?? item.status }}
+                </span>
+              </td>
+              <td class="mono nowrap">{{ formatTime(item.created_at) }}</td>
+              <td>
+                <button class="link" @click="toggleFeedback(item.kind + item.id)">
+                  {{ fbExpanded === item.kind + item.id ? '收起' : '详情' }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-else class="empty">当前筛选下没有反馈。</p>
+
+      <!-- 详情展开：关联问题 / AI 回答 / 引用片段 / 政策文件 + 状态管理 + 处理说明 -->
+      <div
+        v-for="item in fbItems.filter((x) => fbExpanded === x.kind + x.id)"
+        :key="'d' + item.kind + item.id"
+        class="fb-detail"
+      >
+        <template v-if="item.kind === 'qa'">
+          <div class="fb-block">
+            <h4>关联问题</h4>
+            <p class="muted">{{ item.context.question ?? '（未找到对应提问）' }}</p>
+          </div>
+          <div class="fb-block">
+            <h4>AI 回答</h4>
+            <p class="muted">{{ item.context.answer ?? '（回答已不可用）' }}</p>
+          </div>
+          <div v-if="item.context.citations?.length" class="fb-block">
+            <h4>引用片段</h4>
+            <ul class="fb-citations">
+              <li v-for="(c, i) in item.context.citations" :key="i">
+                <span class="tag plain">{{ c.document_title }}</span>
+                <template v-if="c.section_title"> · {{ c.section_title }}</template>
+                <p class="muted tiny">{{ c.snippet }}</p>
+              </li>
+            </ul>
+          </div>
+        </template>
+        <template v-else>
+          <div class="fb-block">
+            <h4>纠错对象</h4>
+            <p class="muted">
+              {{ CORRECTION_TARGET_LABEL[item.context.target_type ?? ''] ?? item.context.target_type }}
+              <template v-if="item.context.document"> · {{ item.context.document.title }}</template>
+            </p>
+          </div>
+          <div v-if="item.context.document" class="fb-block">
+            <h4>相关政策文件</h4>
+            <p class="muted">
+              《{{ item.context.document.title }}》
+              <span class="tag plain">{{ item.context.document.effective_status }}</span>
+              <template v-if="item.context.document.academic_year">
+                · {{ item.context.document.academic_year }}
+              </template>
+            </p>
+          </div>
+        </template>
+
+        <!-- 状态管理 + 处理说明 -->
+        <div class="fb-actions">
+          <div class="fb-status-btns" role="group" aria-label="处理状态">
+            <button
+              v-for="s in (['pending', 'processing', 'resolved'] as FeedbackStatus[])"
+              :key="s"
+              class="chip tiny-chip"
+              :class="{ on: item.status === s }"
+              :disabled="fbSaving"
+              @click="setFeedbackStatus(item, s)"
+            >{{ FEEDBACK_STATUS_LABEL[s] }}</button>
+          </div>
+          <div class="fb-note-row">
+            <textarea
+              v-model="fbNote"
+              class="input fb-note-input"
+              rows="2"
+              :placeholder="item.admin_note ? `已填：${item.admin_note}` : '填写管理员处理说明…'"
+            ></textarea>
+            <button class="btn tiny-btn" :disabled="fbSaving || !fbNote.trim()" @click="saveFeedbackNote(item)">
+              保存说明
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- 单一浮层：四张图共用 -->
     <Transition name="tip">
       <div v-if="tip" class="tip" :style="tipStyle">
@@ -894,5 +1170,132 @@ function bucketLabel(bucket: PortraitBucket) {
 .tip-enter-from,
 .tip-leave-to {
   opacity: 0;
+}
+
+/* ---------- R16 用户反馈管理 ---------- */
+.feedback-admin {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fb-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.fb-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-2);
+  border-radius: var(--radius-control);
+  background: var(--c-surface-2);
+}
+
+.fb-num {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--c-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.fb-reasons {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.fb-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.fb-comment-cell {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-detail {
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-control);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--c-surface-1);
+}
+
+.fb-block h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--c-text-2);
+}
+
+.fb-block p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.fb-citations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.fb-citations p {
+  margin: 2px 0 0;
+}
+
+.fb-actions {
+  border-top: 1px dashed var(--c-border);
+  padding-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fb-status-btns {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.fb-status-btns .chip.on {
+  border-color: var(--c-primary);
+  color: var(--c-primary);
+  font-weight: 600;
+}
+
+.fb-note-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.fb-note-input {
+  flex: 1;
+  min-width: 200px;
+  padding: 6px 8px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+@media (max-width: 760px) {
+  .fb-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 </style>

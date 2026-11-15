@@ -30,6 +30,7 @@ import {
   UNKNOWN_REASON_LABEL,
   evidenceLabel,
 } from '../utils/format'
+import CorrectionModal from '../components/CorrectionModal.vue'
 import { toConfirmPayload } from '../utils/plan'
 import { GRADE_MAX_BY_TYPE, GRADE_MIN, useMatchStore } from '../stores/match'
 
@@ -43,6 +44,8 @@ const conditionsByDoc = ref<Record<string, number>>({})
  * 这份清单来自已经在拉取的规则列表，不额外发请求。
  */
 const groupsByDoc = ref<Record<string, string[]>>({})
+// R16 纠错反馈：匹配结果页上的上报入口（不改结论，只记反馈）
+const correctionOpen = ref(false)
 const matching = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -802,6 +805,12 @@ watch(
           计划已确认（{{ confirmedId }}），到「计划与任务」页可以推进任务状态。
         </p>
       </section>
+
+      <!-- R16 纠错入口：匹配结论依据的政策内容有误时上报 -->
+      <p class="match-correction">
+        <button class="link" @click="correctionOpen = true">报告此处有误</button>
+        <span class="muted tiny">——匹配结论依据的政策内容有误？提交后管理员会核对。</span>
+      </p>
     </template>
 
     <section v-if="draft" class="card">
@@ -831,10 +840,27 @@ watch(
         <button class="btn btn-ghost" :disabled="confirming" @click="draft = null">放弃草稿</button>
       </div>
     </section>
+
+    <!-- R16 纠错反馈弹层：资格匹配结果 -->
+    <CorrectionModal
+      v-if="result"
+      :open="correctionOpen"
+      target-type="match"
+      :target-id="result.session_id"
+      :document-id="result.document_id"
+      :target-title="currentDoc?.title ?? '匹配结果'"
+      @close="correctionOpen = false"
+    />
   </div>
 </template>
 
 <style scoped>
+.match-correction {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+}
 .page {
   display: flex;
   flex-direction: column;
