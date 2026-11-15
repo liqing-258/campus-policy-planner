@@ -139,7 +139,34 @@ def test_message_list_carries_the_feedback(app, client, student_headers):
         headers=student_headers,
     ).get_json()
     answers = [m for m in body["data"]["items"] if m["role"] == "assistant"]
-    assert answers[0]["feedback"] == {"helpful": False, "reason_code": "too_vague"}
+    # R16：feedback 现在多了 comment 字段（刷新后能恢复学生填的话），断言要跟着变
+    assert answers[0]["feedback"] == {
+        "helpful": False, "reason_code": "too_vague", "comment": None,
+    }
 
     questions = [m for m in body["data"]["items"] if m["role"] == "user"]
     assert questions[0]["feedback"] is None
+
+# ---------------------------------------------------------------- R16 回归：答案评价
+def test_qa_feedback_accepts_irrelevant(app, client, student_headers):
+    """需求新增的「回答与问题不相关」原因码在既有接口上可用。"""
+    seed = _seed_answer(app)
+    body = post_feedback(client, student_headers, seed["answer_id"],
+                         helpful=False, reason_code="irrelevant",
+                         comment="答非所问").get_json()
+    assert body["code"] == 0, body
+    assert body["data"]["reason_code"] == "irrelevant"
+    assert body["data"]["comment"] == "答非所问"
+
+
+def test_message_list_carries_the_comment(app, client, student_headers):
+    """回答历史带回 comment，刷新后学生能看到自己填过的话。"""
+    seed = _seed_answer(app)
+    post_feedback(client, student_headers, seed["answer_id"],
+                  helpful=False, reason_code="other", comment="补充说明")
+    body = client.get(
+        f"/api/v1/conversations/{seed['conversation_id']}/messages",
+        headers=student_headers,
+    ).get_json()
+    answers = [m for m in body["data"]["items"] if m["role"] == "assistant"]
+    assert answers[0]["feedback"]["comment"] == "补充说明"
