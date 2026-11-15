@@ -1,4 +1,4 @@
-"""ORM 模型：15 张表。
+"""ORM 模型：16 张表。
 
 字段与索引的唯一权威来源是 docs/20-系统设计/数据模型.md。
 本文件不写业务逻辑，只做结构映射；改字段前先改文档。
@@ -431,11 +431,54 @@ class CalendarEvent(db.Model):
     updated_at = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
+# ------------------------------------------------------- 3.15 favorites
+class Favorite(db.Model):
+    """常用政策收藏（R17）。
+
+    **为什么是一张独立的关联表，而不是在各处加「收藏」布尔列**
+
+    收藏对象横跨四类既有实体（政策文件 / 指南事项 / 问答 / 事务计划），
+    给每一张表都加一列「收藏状态」意味着改 4 张表 + 4 份迁移，且「谁收藏了」
+    本身就是按用户隔离的多对多关系，塞进目标表反而说不清归属。一张
+    `user_id + target_type + target_id` 的关联表最直白，也满足「不改动原有
+    政策文件和问答的数据结构」这条硬约束。
+
+    **为什么存 title / document_id 快照**
+
+    - `title`：目标被下架 / 删除后，收藏列表仍要能显示「收藏的是什么」；
+    - `document_id`：把「关联政策文件」这一维固定下来，展示时实时 JOIN 拿
+      `effective_status`，于是「政策更新或失效后同步显示最新有效状态」成立——
+      快照存的是**指向**，不是**状态**，状态永远现算。
+
+    同一个人对同一个目标只留一条：唯一约束 `user + target_type + target_id`。
+    重复收藏是覆盖（幂等），不是新增——和 qa_feedback 的幂等方式一致。
+    """
+
+    __tablename__ = "favorites"
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "target_type", "target_id",
+                            name="uq_favorites_user_target"),
+        db.Index("idx_favorites_user_created", "user_id", "created_at"),
+        db.Index("idx_favorites_target", "target_type", "target_id"),
+    )
+
+    id = db.Column(db.String(26), primary_key=True)
+    user_id = db.Column(db.String(26), db.ForeignKey("users.id"), nullable=False)
+    # document=政策文件 / guide=指南事项 / qa=问答 / plan=事务计划
+    target_type = db.Column(db.String(16), nullable=False)
+    target_id = db.Column(db.String(64), nullable=False)
+    # 收藏那一刻的名称快照；目标改名/删除后仍能显示
+    title = db.Column(db.String(200), nullable=False)
+    # 关联政策文件（document 类型即其自身；guide/qa/plan 收藏时解析出的政策）
+    document_id = db.Column(db.String(26), db.ForeignKey("documents.id"))
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+
 # 供 tools/init_db.py 与测试断言使用
 ALL_MODELS = (
     User, Document, DocumentChunk, Conversation, Message, PolicyRule,
     MatchSession, MatchResultItem, ActionPlan, Task, WorkflowRun,
-    QaFeedback, CorrectionFeedback, AuditLog, CalendarEvent,
+    QaFeedback, CorrectionFeedback, AuditLog, CalendarEvent, Favorite,
 )
 
 

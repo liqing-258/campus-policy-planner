@@ -336,3 +336,16 @@ CORRECTION_TARGET_MATCH = "match"
 CORRECTION_TARGETS = (
     CORRECTION_TARGET_DOCUMENT, CORRECTION_TARGET_GUIDE, CORRECTION_TARGET_MATCH,
 )
+
+
+# ---------- R17：常用政策收藏 ----------
+# 四类收藏对象。收藏只存「谁 + 收藏了什么」（target_type + target_id 指向既有实体），
+# 不改动政策文件 / 问答 / 计划任何一张表的结构。
+# 展示时实时 JOIN 目标对象：政策有效状态永远最新，收藏的问答保留原始回答与来源。
+FAVORITE_DOCUMENT = "document"   # 政策文件（documents.id）
+FAVORITE_GUIDE = "guide"         # 校园事务指南事项（guides 编目 key）
+FAVORITE_QA = "qa"               # 重要政策问答（messages.id，助手回答）
+FAVORITE_PLAN = "plan"           # 常用办理事项（action_plans.id，事务计划）
+FAVORITE_TARGETS = (
+    FAVORITE_DOCUMENT, FAVORITE_GUIDE, FAVORITE_QA, FAVORITE_PLAN,
+)
