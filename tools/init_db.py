@@ -1,4 +1,4 @@
-"""建表脚本：一条命令把 14 张表建好，并校验结果。
+"""建表脚本：一条命令把 15 张表建好，并校验结果。
 
 用法：
     .venv\\Scripts\\python.exe tools\\init_db.py           # 建表（已存在则跳过）
@@ -21,7 +21,7 @@ if str(ROOT) not in sys.path:
 from sqlalchemy import inspect, text  # noqa: E402
 
 from app import create_app  # noqa: E402
-from app.models import ALL_MODELS, db  # noqa: E402
+from app.models import ALL_MODELS, db, ensure_columns  # noqa: E402
 
 
 def main() -> int:
@@ -42,6 +42,8 @@ def main() -> int:
             db.drop_all()
 
         db.create_all()
+        # R16：create_all 不改已存在的表，qa_feedback 的三列管理字段要补在这里
+        ensure_columns()
 
         tables = sorted(inspect(db.engine).get_table_names())
         expected = sorted(m.__tablename__ for m in ALL_MODELS)

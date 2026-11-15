@@ -985,7 +985,12 @@ def _serialize_message(message: Message) -> dict:
         "mode": message.mode,
         "workflow_run_id": message.workflow_run_id,
         "feedback": (
-            {"helpful": bool(feedback.helpful), "reason_code": feedback.reason_code}
+            {
+                "helpful": bool(feedback.helpful),
+                "reason_code": feedback.reason_code,
+                # R16：把学生填的文字补充也带回来，刷新后能恢复已提交的内容
+                "comment": feedback.comment,
+            }
             if feedback is not None else None
         ),
         "created_at": _iso(message.created_at),

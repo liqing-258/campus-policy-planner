@@ -39,13 +39,15 @@ def _year_of(path: Path) -> int | None:
 
 
 def ensure_schema() -> int:
-    """建表。返回新建的表数量（0 表示已存在）。"""
+    """建表 + 轻量迁移。返回新建的表数量（0 表示已存在）。"""
     from sqlalchemy import inspect
 
-    from app.models import db
+    from app.models import db, ensure_columns
 
     existing = set(inspect(db.engine).get_table_names())
     db.create_all()
+    # R16：create_all 不改已存在的表，qa_feedback 的三列管理字段要补在这里
+    ensure_columns()
     now = set(inspect(db.engine).get_table_names())
     return len(now - existing)
 

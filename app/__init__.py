@@ -51,6 +51,7 @@ def create_app(overrides: dict | None = None) -> Flask:
     from app import analytics as analytics_mod
     from app import auth as auth_mod
     from app import calendar as calendar_mod
+    from app import feedback as feedback_mod
     from app import documents as documents_mod
     from app import guides as guides_mod
     from app import health as health_mod
@@ -80,6 +81,10 @@ def create_app(overrides: dict | None = None) -> Flask:
     # 这里只是把"最近变了什么"按学生视角聚合出来
     app.register_blueprint(policy_updates_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(tasks_mod.bp, url_prefix=API_PREFIX)
+    # 办事评价与纠错反馈（R16）：答案评价仍走 qa.py 的既有接口，这里只挂
+    # 纠错反馈的写入口 + 管理员反馈管理 + 统计；反馈不写正式政策内容
+    app.register_blueprint(feedback_mod.bp, url_prefix=API_PREFIX)
+
     # 校园日历（R14）：任务与个人日程在接口层合并成一种形状。
     # 个人日程需要一张表（tasks.plan_id 是 NOT NULL，且 create_all 不改老库），
     # 任务侧零新表、零新列，改期与完成都走既有的 /tasks 接口
