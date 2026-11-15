@@ -292,6 +292,8 @@ export interface DocumentRow {
   academic_year: string | null
   version_label: string | null
   effective_status: string
+  /** R15：被哪份文件替代（人工确认的版本关联），无则为 null */
+  supersedes_id: string | null
   scope_note: string | null
   parse_status: ParseStatus
   chunk_count: number
@@ -558,6 +560,8 @@ export interface MatchItem {
 export interface MatchData {
   session_id: string
   document_id: string
+  /** R15：该文件存在多个版本时的核对提醒（单版本为 null） */
+  version_note?: MatchVersionNote | null
   profile: Record<string, unknown>
   items: MatchItem[]
   summary: { met: number; not_met: number; unknown: number; total: number }
@@ -1041,4 +1045,77 @@ export interface CalendarEventRow {
   category_label: string
   created_at: string | null
   updated_at: string | null
+}
+
+/* ============================================================
+   政策版本与更新提醒（R15）
+   版本关系只有一份真值：documents.supersedes_id + 主题归并（后端现算）。
+   这里没有"版本表"的类型——历史版本就是 DocumentRow 的精简版。
+   ============================================================ */
+
+export type VersionMatchKind = 'same_topic' | 'similar'
+
+export interface VersionBrief {
+  document_id: string
+  title: string
+  file_type: string
+  department: string | null
+  published_at: string | null
+  academic_year: string | null
+  version_label: string | null
+  effective_status: string
+  supersedes_id: string | null
+  created_at: string
+  match?: VersionMatchKind
+  similarity?: number
+  is_current?: boolean
+}
+
+export interface VersionCandidates {
+  strong: VersionBrief[]
+  weak: VersionBrief[]
+}
+
+export interface DocumentVersions {
+  document_id: string
+  newest_document_id: string
+  count: number
+  versions: VersionBrief[]
+  hint: string
+}
+
+export interface PolicyUpdateItem {
+  document_id: string
+  title: string
+  department: string | null
+  published_at: string | null
+  academic_year: string | null
+  version_label: string | null
+  effective_status: string
+  created_at: string
+  updated_at: string
+  change_kind: 'new_file' | 'meta_updated'
+  /** 只有两句固定话——系统不比对条款，不允许出现任何"变化内容" */
+  change_summary: string
+  version_count: number
+  has_newer: boolean
+  newer_document_id: string | null
+  related_plans: { id: string; title: string; document_id: string | null }[]
+  may_affect_plans: boolean
+}
+
+export interface PolicyUpdates {
+  window_days: number
+  today: string
+  items: PolicyUpdateItem[]
+  counts: { total: number; new_file: number; meta_updated: number; plan_related: number }
+  notice: string
+}
+
+export interface MatchVersionNote {
+  has_multiple: boolean
+  count: number
+  newest_document_id: string
+  versions: VersionBrief[]
+  hint: string
 }

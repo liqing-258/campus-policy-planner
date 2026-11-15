@@ -8,7 +8,15 @@
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { api, type ChunkRow, type DocumentRow, type Paged } from '../api/client'
+import {
+  api,
+  type ChunkRow,
+  type DocumentRow,
+  type DocumentVersions,
+  type Paged,
+  type VersionBrief,
+  type VersionCandidates,
+} from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import {
   EFFECTIVE_LABEL,
@@ -34,6 +42,18 @@ const chunks = ref<ChunkRow[]>([])
 const chunkTotal = ref(0)
 const openDocId = ref('')
 const chunkLoading = ref(false)
+
+/* ---------------- R15：政策版本与更新提醒 ---------------- */
+const docVersions = ref<DocumentVersions | null>(null)
+const versionLoading = ref(false)
+// 上传后"是否属于政策更新"的提示（后端 possible_updates 原样带出）
+const uploadPrompt = ref<(VersionCandidates & { newId: string; newTitle: string }) | null>(null)
+const linkForm = ref({ oldId: '', newStatus: 'active' })
+const linking = ref(false)
+const linkMsg = ref('')
+const linkError = ref('')
+// 相关文件 = 同发布部门的其他文件（真实关联；不做语义推荐）
+const relatedDocs = ref<DocumentRow[]>([])
 
 const uploading = ref(false)
 const uploadMsg = ref('')
@@ -127,6 +147,11 @@ async function toggleChunks(doc: DocumentRow) {
   openDocId.value = doc.id
   chunkLoading.value = true
   chunks.value = []
+  linkForm.value = { oldId: '', newStatus: 'active' }
+  linkMsg.value = ''
+  linkError.value = ''
+  void loadVersions(doc.id)
+  void loadRelated(doc)
   try {
     const data = await api.get<Paged<ChunkRow>>(
       `/documents/${doc.id}/chunks?page=1&page_size=50`,
@@ -137,6 +162,112 @@ async function toggleChunks(doc: DocumentRow) {
     error.value = err instanceof Error ? err.message : '片段加载失败'
   } finally {
     chunkLoading.value = false
+  }
+}
+
+/** 同一政策的全部版本（主题组 ∪ 人工 supersedes 链），详情页"历史版本"用。 */
+async function loadVersions(docId: string) {
+  versionLoading.value = true
+  docVersions.value = null
+  try {
+    docVersions.value = await api.get<DocumentVersions>(`/documents/${docId}/versions`)
+  } catch {
+    docVersions.value = null
+  } finally {
+    versionLoading.value = false
+  }
+}
+
+/**
+ * 旧版本横幅：当前文件已被替代 / 不是最新版时给醒目提示。
+ * 两件事必须分开说——「已被替代」是管理员确认过的事实，
+ * 「不是最新」只是日期比较的推断。
+ */
+function versionBanner(doc: DocumentRow): { tone: 'warn' | 'info'; text: string } | null {
+  const list = docVersions.value
+  if (!list || list.count < 2 || list.document_id !== doc.id) return null
+  const newest = list.versions.find((v) => v.document_id === list.newest_document_id)
+  // 「已被替代」是管理员确认过的事实，**不依赖"是否最新"的日期推断**——
+  // 第一版先判 newest，结果被日期排序短路：旧版标了已被替代却看不到横幅。
+  if (doc.effective_status === 'superseded') {
+    const who = newest && newest.document_id !== doc.id ? `；最新版本是《${newest.title}》` : ''
+    return { tone: 'warn', text: `该文件已被替代，请勿按本文条款办理${who}。` }
+  }
+  if (!newest || newest.document_id === doc.id) return null
+  return { tone: 'info', text: `该文件不是最新版本，最新的是《${newest.title}》——仅供查阅，请核对后再办理。` }
+}
+
+/** 打开另一个版本的详情：目标不一定在当前页，先定位页码再展开。 */
+async function openVersion(v: VersionBrief) {
+  await openDocById(v.document_id)
+}
+
+/** 管理员确认版本关联：一次做"设关联 + 旧版标已被替代 + 新版标有效状态"。 */
+async function linkVersion() {
+  if (!openDocId.value || !linkForm.value.oldId) return
+  linking.value = true
+  linkMsg.value = ''
+  linkError.value = ''
+  try {
+    await api.post(`/documents/${openDocId.value}/version-link`, {
+      supersedes_id: linkForm.value.oldId,
+      new_status: linkForm.value.newStatus,
+    })
+    linkMsg.value = '版本关联已建立：旧版已标记「已被替代」。'
+    await loadVersions(openDocId.value)
+    await loadDocs()
+  } catch (err) {
+    linkError.value = err instanceof Error ? err.message : '关联失败'
+  } finally {
+    linking.value = false
+  }
+}
+
+/** 同发布部门的其他文件（排除自己与同主题版本——它们在"历史版本"里已列出）。 */
+async function loadRelated(doc: DocumentRow) {
+  relatedDocs.value = []
+  if (!doc.department) return
+  try {
+    const all = await api.get<Paged<DocumentRow>>('/documents?page=1&page_size=100')
+    const familyIds = new Set((docVersions.value?.versions ?? []).map((v) => v.document_id))
+    relatedDocs.value = all.items
+      .filter((d) => d.id !== doc.id && d.department === doc.department && !familyIds.has(d.id))
+      .slice(0, 5)
+  } catch {
+    relatedDocs.value = []
+  }
+}
+
+/** 「关联历史版本」字段：supersedes_id 指向的那份文件的标题。 */
+function linkedOldTitle(doc: DocumentRow): string {
+  if (!doc.supersedes_id) return ''
+  const hit = docVersions.value?.versions.find((v) => v.document_id === doc.supersedes_id)
+  return hit ? hit.title : '已关联（对方不在当前家族列表）'
+}
+
+function dismissUploadPrompt() {
+  uploadPrompt.value = null
+}
+
+/** 上传完成后的"是否政策更新"一键建联（新文件替代所选旧文件）。 */
+async function confirmUploadLink() {
+  const prompt = uploadPrompt.value
+  if (!prompt || !linkForm.value.oldId) return
+  linking.value = true
+  linkError.value = ''
+  try {
+    await api.post(`/documents/${prompt.newId}/version-link`, {
+      supersedes_id: linkForm.value.oldId,
+      new_status: linkForm.value.newStatus,
+    })
+    uploadPrompt.value = null
+    linkForm.value = { oldId: '', newStatus: 'active' }
+    uploadMsg.value = '版本关联已建立：旧版已标记「已被替代」。'
+    await loadDocs()
+  } catch (err) {
+    linkError.value = err instanceof Error ? err.message : '关联失败'
+  } finally {
+    linking.value = false
   }
 }
 
@@ -161,8 +292,27 @@ async function onUpload(event: Event) {
     form.append('effective_status', uploadMeta.value.effective_status)
   }
   try {
-    const doc = await api.upload<DocumentRow>('/documents', form)
+    const doc = await api.upload<DocumentRow & { possible_updates?: VersionCandidates }>(
+      '/documents', form,
+    )
     uploadMsg.value = `已上传「${doc.title}」，解析状态：${parseStatus(doc.parse_status).label}`
+    // "是否属于政策更新"的提示点：同主题/高度相似的既有文件原样带出，
+    // 由管理员确认——确认前不建联、不改任何人的有效状态
+    const found = doc.possible_updates
+    if (found && (found.strong.length || found.weak.length)) {
+      uploadPrompt.value = {
+        strong: found.strong,
+        weak: found.weak,
+        newId: doc.id,
+        newTitle: doc.title,
+      }
+      linkForm.value = {
+        oldId: (found.strong[0] ?? found.weak[0])?.document_id ?? '',
+        newStatus: 'active',
+      }
+    } else {
+      uploadPrompt.value = null
+    }
     resetUploadMeta()
     page.value = 1
     await loadDocs()
@@ -195,8 +345,7 @@ const statusOptions = Object.keys(PARSE_STATUS)
  */
 const highlightId = ref('')
 
-async function openFromQuery() {
-  const target = String(route.query.doc ?? '')
+async function openDocById(target: string) {
   if (!target) return
   highlightId.value = target
   statusFilter.value = ''
@@ -217,6 +366,10 @@ async function openFromQuery() {
   if (openDocId.value !== target) await toggleChunks(found)
   await nextTick()
   document.getElementById(`doc-${target}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+async function openFromQuery() {
+  await openDocById(String(route.query.doc ?? ''))
 }
 
 // 挂载时必须先拉一次列表：`openFromQuery` 在没有 `?doc=` 时直接 return，
@@ -283,7 +436,7 @@ function search() {
         <label class="field">
           <span>有效状态</span>
           <select v-model="uploadMeta.effective_status" class="meta-input">
-            <option value="">未标注（存入 unknown）</option>
+            <option value="">暂未确认（存入 unknown）</option>
             <option v-for="s in effectiveOptions" :key="s" :value="s">
               {{ EFFECTIVE_LABEL[s] }}
             </option>
@@ -311,6 +464,54 @@ function search() {
       </div>
       <p v-if="uploadMsg" class="ok-line">{{ uploadMsg }}</p>
       <p v-if="uploadError" class="err-line">{{ uploadError }}</p>
+
+      <!-- R15：上传同主题/高度相似文件时的"是否政策更新"提示。
+           只提示与一键关联，不自动建联、不自动改有效状态 -->
+      <div v-if="uploadPrompt" class="update-prompt">
+        <p class="prompt-head">
+          <strong>这份文件可能属于政策更新</strong>
+          <span class="muted tiny">——与下列已有文件主题相同或高度相似，请确认新旧关系</span>
+        </p>
+        <ul class="prompt-list">
+          <li v-for="c in uploadPrompt.strong" :key="c.document_id" class="prompt-item">
+            <label>
+              <input v-model="linkForm.oldId" type="radio" :value="c.document_id" />
+              <strong>{{ c.title }}</strong>
+              <span class="tag plain">主题相同</span>
+            </label>
+            <span class="muted tiny">
+              {{ c.published_at ?? '发布日期未知' }} · {{ EFFECTIVE_LABEL[c.effective_status] ?? c.effective_status }}
+            </span>
+          </li>
+          <li v-for="c in uploadPrompt.weak" :key="c.document_id" class="prompt-item">
+            <label>
+              <input v-model="linkForm.oldId" type="radio" :value="c.document_id" />
+              <strong>{{ c.title }}</strong>
+              <span class="tag plain">标题高度相似</span>
+            </label>
+            <span class="muted tiny">
+              {{ c.published_at ?? '发布日期未知' }} · {{ EFFECTIVE_LABEL[c.effective_status] ?? c.effective_status }}
+            </span>
+          </li>
+        </ul>
+        <div class="prompt-actions">
+          <select v-model="linkForm.newStatus" class="meta-input">
+            <option v-for="st in effectiveOptions" :key="st" :value="st">
+              新版本标为「{{ EFFECTIVE_LABEL[st] }}」
+            </option>
+          </select>
+          <button class="btn" :disabled="linking || !linkForm.oldId" @click="confirmUploadLink">
+            {{ linking ? '处理中…' : '是，建立版本关联' }}
+          </button>
+          <button class="btn btn-ghost" :disabled="linking" @click="dismissUploadPrompt">
+            否，保持独立
+          </button>
+          <span v-if="linkError" class="err-line">{{ linkError }}</span>
+        </div>
+        <p class="muted tiny">
+          建立关联会把所选旧文件标记「已被替代」。不确定就先选「保持独立」，之后可在文件详情里关联。
+        </p>
+      </div>
     </section>
 
     <p v-else class="muted small">上传入口仅管理员可见。学生可浏览片段并定位原文。</p>
@@ -396,7 +597,7 @@ function search() {
                   <label class="field">
                     <span>有效状态</span>
                     <select v-model="editForm.effective_status" class="meta-input">
-                      <option value="">未标注（存入 unknown）</option>
+                      <option value="">暂未确认（存入 unknown）</option>
                       <option v-for="s in effectiveOptions" :key="s" :value="s">
                         {{ EFFECTIVE_LABEL[s] }}
                       </option>
@@ -419,9 +620,146 @@ function search() {
             </tr>
             <tr v-if="openDocId === doc.id" class="detail-row">
               <td colspan="8">
+                <!-- R15 旧版本提示：「已被替代」是管理员确认的事实，
+                     「不是最新」只是日期推断，两句话不混用 -->
+                <div
+                  v-if="versionBanner(doc)"
+                  :class="['version-banner', versionBanner(doc)!.tone]"
+                >
+                  <span>{{ versionBanner(doc)!.text }}</span>
+                  <button
+                    v-if="docVersions && docVersions.newest_document_id !== doc.id"
+                    class="btn btn-ghost"
+                    @click="openVersion(docVersions.versions.find(
+                      (v) => v.document_id === docVersions!.newest_document_id) as VersionBrief)"
+                  >
+                    查看新版本
+                  </button>
+                </div>
+
+                <!-- 基本信息（需求二.1 的八项） -->
+                <dl class="meta-grid">
+                  <div><dt>政策名称</dt><dd>{{ doc.title }}</dd></div>
+                  <div><dt>发布部门</dt><dd>{{ doc.department ?? '未标注' }}</dd></div>
+                  <div><dt>发布日期</dt><dd class="mono">{{ doc.published_at ?? '未标注' }}</dd></div>
+                  <div><dt>适用学年</dt><dd class="mono">{{ doc.academic_year ?? '未标注' }}</dd></div>
+                  <div><dt>文件版本</dt><dd>{{ doc.version_label ?? '未标注' }}</dd></div>
+                  <div>
+                    <dt>当前有效状态</dt>
+                    <dd>
+                      <span :class="['tag', doc.effective_status === 'active' ? 'met' : 'plain']">
+                        {{ EFFECTIVE_LABEL[doc.effective_status] ?? doc.effective_status }}
+                      </span>
+                    </dd>
+                  </div>
+                  <div><dt>上传时间</dt><dd class="mono">{{ formatTime(doc.created_at) }}</dd></div>
+                  <div>
+                    <dt>关联历史版本</dt>
+                    <dd>
+                      <template v-if="linkedOldTitle(doc)">{{ linkedOldTitle(doc) }}</template>
+                      <template v-else>未关联</template>
+                    </dd>
+                  </div>
+                </dl>
+
+                <!-- 政策摘要：scope_note + 原文开头。不是生成的摘要，
+                     摘要写错了会变成"看起来很权威的假话" -->
+                <div class="summary-block">
+                  <h4>政策摘要</h4>
+                  <p v-if="doc.scope_note">{{ doc.scope_note }}</p>
+                  <p v-if="chunks.length" class="muted">
+                    原文开头：{{ chunks[0].content.slice(0, 160) }}{{ chunks[0].content.length > 160 ? '…' : '' }}
+                  </p>
+                  <p v-else-if="!chunkLoading" class="muted small">暂无正文可摘录。</p>
+                </div>
+
+                <!-- 历史版本：点击打开对应文件与原文 -->
+                <div class="version-block">
+                  <h4>
+                    历史版本
+                    <span v-if="docVersions" class="muted small">（同主题共 {{ docVersions.count }} 份）</span>
+                  </h4>
+                  <div v-if="versionLoading" class="muted small">版本信息加载中…</div>
+                  <template v-else-if="docVersions && docVersions.count > 1">
+                    <ul class="version-list">
+                      <li
+                        v-for="v in docVersions.versions"
+                        :key="v.document_id"
+                        :class="['version-item', { current: v.is_current }]"
+                        role="button"
+                        tabindex="0"
+                        @click="openVersion(v)"
+                        @keydown.enter="openVersion(v)"
+                      >
+                        <span class="tag plain">{{ EFFECTIVE_LABEL[v.effective_status] ?? v.effective_status }}</span>
+                        <strong>{{ v.title }}</strong>
+                        <span class="muted tiny mono">
+                          {{ v.published_at ?? '发布日期未知' }}
+                          <template v-if="v.version_label"> · {{ v.version_label }}</template>
+                        </span>
+                        <span v-if="v.is_current" class="tag met">当前查看</span>
+                        <span class="open-hint">打开原文 →</span>
+                      </li>
+                    </ul>
+                    <p class="muted tiny">{{ docVersions.hint }}</p>
+                  </template>
+                  <p v-else class="muted small">未发现同主题的其他版本。</p>
+                </div>
+
+                <!-- 管理员：手动建立版本关联（标题改过名的版本只能这样建） -->
+                <div v-if="auth.isAdmin" class="link-block">
+                  <h4>关联版本（管理员）</h4>
+                  <div class="prompt-actions">
+                    <select v-model="linkForm.oldId" class="meta-input">
+                      <option value="">选择被替代的旧文件…</option>
+                      <option
+                        v-for="v in (docVersions?.versions ?? []).filter((x) => x.document_id !== doc.id)"
+                        :key="v.document_id"
+                        :value="v.document_id"
+                      >
+                        {{ v.title }}
+                      </option>
+                    </select>
+                    <select v-model="linkForm.newStatus" class="meta-input">
+                      <option v-for="st in effectiveOptions" :key="st" :value="st">
+                        本文件标为「{{ EFFECTIVE_LABEL[st] }}」
+                      </option>
+                    </select>
+                    <button class="btn" :disabled="linking || !linkForm.oldId" @click="linkVersion">
+                      {{ linking ? '处理中…' : '建立关联' }}
+                    </button>
+                    <span v-if="linkMsg" class="ok-line">{{ linkMsg }}</span>
+                    <span v-if="linkError" class="err-line">{{ linkError }}</span>
+                  </div>
+                  <p class="muted tiny">
+                    确认后：所选旧文件标记「已被替代」，本文件标记为所选状态，并记录审计。
+                  </p>
+                </div>
+
+                <!-- 相关文件：同一发布部门的其他文件（真实关联，不做语义推荐） -->
+                <div v-if="relatedDocs.length" class="related-block">
+                  <h4>相关文件（同发布部门）</h4>
+                  <ul class="version-list">
+                    <li
+                      v-for="r in relatedDocs"
+                      :key="r.id"
+                      class="version-item"
+                      role="button"
+                      tabindex="0"
+                      @click="openDocById(r.id)"
+                      @keydown.enter="openDocById(r.id)"
+                    >
+                      <span class="tag plain">{{ EFFECTIVE_LABEL[r.effective_status] ?? r.effective_status }}</span>
+                      <strong>{{ r.title }}</strong>
+                      <span class="open-hint">打开 →</span>
+                    </li>
+                  </ul>
+                </div>
+
                 <div v-if="chunkLoading" class="muted small">片段加载中…</div>
                 <div v-else-if="!chunks.length" class="muted small">该文件没有片段。</div>
                 <div v-else class="chunk-list">
+                  <h4>原文片段</h4>
                   <div class="muted small">共 {{ chunkTotal }} 个片段，按顺序展示：</div>
                   <article v-for="chunk in chunks" :key="chunk.id" class="chunk">
                     <header>
@@ -716,5 +1054,137 @@ function search() {
     display: block;
     overflow-x: auto;
   }
+}
+
+/* ---------- R15：版本与更新提醒 ---------- */
+.version-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  margin-bottom: var(--space-3);
+  font-size: 12.5px;
+}
+.version-banner.warn {
+  background: var(--c-not-met-bg);
+  border: 1px solid var(--c-not-met-border);
+  color: var(--c-not-met);
+  font-weight: 600;
+}
+.version-banner.info {
+  background: var(--c-warn-bg);
+  border: 1px solid var(--c-warn-border);
+  color: var(--c-text);
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-3);
+}
+.meta-grid dt {
+  font-size: 11px;
+  color: var(--c-text-2);
+}
+.meta-grid dd {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.summary-block,
+.version-block,
+.link-block,
+.related-block {
+  margin: 0 0 var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--c-border);
+}
+.summary-block h4,
+.version-block h4,
+.link-block h4,
+.related-block h4 {
+  margin: 0 0 var(--space-2);
+  font-size: 12.5px;
+}
+.summary-block p {
+  margin: 0 0 var(--space-1);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.version-list {
+  list-style: none;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.version-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 5px var(--space-2);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.version-item:hover {
+  background: var(--c-surface-2);
+}
+.version-item.current {
+  border: 1px solid var(--c-primary);
+}
+.open-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--c-primary);
+  opacity: 0;
+  white-space: nowrap;
+}
+.version-item:hover .open-hint {
+  opacity: 1;
+}
+
+.update-prompt {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--c-warn-border);
+  background: var(--c-warn-bg);
+  border-radius: var(--radius-control);
+}
+.prompt-head {
+  margin: 0 0 var(--space-2);
+  font-size: 12.5px;
+}
+.prompt-list {
+  list-style: none;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.prompt-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: 12.5px;
+}
+.prompt-item label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  cursor: pointer;
+}
+.prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 </style>

@@ -16,6 +16,7 @@ import {
   api,
   type DraftData,
   type DocumentRow,
+  type DocumentVersions,
   type MatchData,
   type MatchItem,
   type MatchStatus,
@@ -490,6 +491,19 @@ const grouped = computed(() => {
 })
 
 const currentDoc = computed(() => documents.value.find((d) => d.id === match.documentId))
+
+/* R15：选中的文件若存在多个版本，开跑前提醒核对（结果里也会带 version_note）。
+   提醒不替用户选版本——哪版有效只有管理员的标注说了算。 */
+const selectVersions = ref<DocumentVersions | null>(null)
+watch(documentId, async (id) => {
+  selectVersions.value = null
+  if (!id) return
+  try {
+    selectVersions.value = await api.get<DocumentVersions>(`/documents/${id}/versions`)
+  } catch {
+    selectVersions.value = null
+  }
+}, { immediate: true })
 const groups = computed(() =>
   match.documentId ? groupsByDoc.value[match.documentId] ?? [] : [],
 )
@@ -670,6 +684,10 @@ watch(
         </button>
         <span class="muted tiny">不调用模型：同样的画像每次得到同样的结果。</span>
       </div>
+      <p v-if="selectVersions && selectVersions.count > 1" class="version-pre-warn">
+        该政策在知识库有 {{ selectVersions.count }} 个版本，判定前请核对使用的是不是现行有效版——
+        <router-link :to="`/library?doc=${selectVersions.document_id}`">查看版本列表</router-link>
+      </p>
     </section>
 
     <p v-if="error" class="err-line">{{ error }}</p>
@@ -694,6 +712,13 @@ watch(
     </section>
 
     <template v-if="result">
+      <!-- R15：版本核对提醒。有多个版本时先说版本，再说结论 -->
+      <section v-if="result.version_note" class="card version-warn">
+        <p>
+          <strong>该政策存在 {{ result.version_note.count }} 个版本</strong>
+          <span class="muted">——{{ result.version_note.hint }}</span>
+        </p>
+      </section>
       <section class="card summary">
         <div>
           <h3>匹配结论</h3>
@@ -1113,5 +1138,20 @@ watch(
 
 .draft-tasks li:last-child {
   border-bottom: none;
+}
+
+/* ---------- R15：版本提醒 ---------- */
+.version-warn {
+  border-left: 3px solid var(--c-warn-border);
+  background: var(--c-warn-bg);
+}
+.version-warn p {
+  margin: 0;
+  font-size: 12.5px;
+}
+.version-pre-warn {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+  color: var(--c-unknown);
 }
 </style>

@@ -23,6 +23,7 @@ import {
   api,
   type CalendarAgenda,
   type CalendarItem,
+  type PolicyUpdates,
   type ConversationRow,
   type DocumentRow,
   type Health,
@@ -52,11 +53,13 @@ const plans = ref<PlanRow[]>([])
 const documents = ref<DocumentRow[]>([])
 const stats = ref<TaskStats | null>(null)
 const agenda = ref<CalendarAgenda | null>(null)
+// R15：政策更新（只提示版本/状态变化，不比对条款——文案来自后端固定两句）
+const updates = ref<PolicyUpdates | null>(null)
 const loading = ref(true)
 const error = ref('')
 
 onMounted(async () => {
-  const [h, t, c, p, d, s, g] = await Promise.allSettled([
+  const [h, t, c, p, d, s, g, u] = await Promise.allSettled([
     api.get<Health>('/health'),
     api.get<Paged<TaskRow>>('/tasks?page=1&page_size=14'),
     api.get<Paged<ConversationRow>>('/conversations?page=1&page_size=10'),
@@ -66,6 +69,7 @@ onMounted(async () => {
     // 窗口天数固定 7：与 /tasks/stats 的 due_soon 同一口径，
     // 两处不一致时用户会看到"7 天内到期 3 项"但这里只列 2 条
     api.get<CalendarAgenda>('/calendar/agenda?days=7'),
+    api.get<PolicyUpdates>('/policies/updates?days=30'),
   ])
   if (h.status === 'fulfilled') health.value = h.value
   if (t.status === 'fulfilled') tasks.value = t.value.items
@@ -75,7 +79,8 @@ onMounted(async () => {
   if (d.status === 'fulfilled') documents.value = d.value.items.filter((doc) => doc.chunk_count > 0)
   if (s.status === 'fulfilled') stats.value = s.value
   if (g.status === 'fulfilled') agenda.value = g.value
-  const failure = [h, t, c, p, d, s, g].find((r) => r.status === 'rejected') as
+  if (u.status === 'fulfilled') updates.value = u.value
+  const failure = [h, t, c, p, d, s, g, u].find((r) => r.status === 'rejected') as
     | PromiseRejectedResult
     | undefined
   if (failure) {
@@ -143,6 +148,13 @@ function dueText(task: TaskRow) {
 function go(path: string) {
   void router.push(path)
 }
+
+/** 政策更新卡的「查看」：落到知识库该文件的详情（带 ?doc= 深链）。 */
+function goPolicy(docId: string) {
+  void router.push({ path: '/library', query: { doc: docId } })
+}
+
+const updateItems = computed(() => updates.value?.items ?? [])
 
 /**
  * 点工作台上的日程：有日期的落到那个月的日历，没有日期的落到日历页的
@@ -275,6 +287,46 @@ function goCalendar(item: CalendarItem) {
             <span class="utext">{{ item.title }}</span>
           </button>
         </div>
+      </div>
+    </section>
+
+    <!-- R15 政策更新：只报事实（哪份政策 / 发布日期 / 有效状态 / 与我的计划），
+         不写一句"改了什么条款"——系统不做条款 diff，编出来的差异比没有更害人 -->
+    <section v-if="updateItems.length" class="card updates-card">
+      <div class="list-head">
+        <h3>政策更新</h3>
+        <span class="muted tiny">
+          近 30 天 {{ updates?.counts.total ?? 0 }} 项
+          <template v-if="(updates?.counts.plan_related ?? 0) > 0">
+            · <span class="warn-text">与我的计划相关 {{ updates?.counts.plan_related }} 项</span>
+          </template>
+        </span>
+      </div>
+      <p class="muted tiny">{{ updates?.notice }}</p>
+      <div class="update-grid">
+        <article
+          v-for="item in updateItems.slice(0, 6)"
+          :key="item.document_id"
+          :class="['update-row', { plan: item.may_affect_plans }]"
+        >
+          <div class="update-main">
+            <strong class="update-title">{{ item.title }}</strong>
+            <span class="muted tiny">
+              {{ item.change_summary }}
+              · 发布 {{ item.published_at ?? '日期未知' }}
+              · <span :class="['tag', item.effective_status === 'active' ? 'met' : 'plain']">
+                {{ EFFECTIVE_LABEL[item.effective_status] ?? item.effective_status }}
+              </span>
+              <template v-if="item.version_count > 1"> · 共 {{ item.version_count }} 个版本</template>
+            </span>
+            <span v-if="item.may_affect_plans" class="plan-hint">
+              可能影响已有事务计划：{{ item.related_plans.map((p) => p.title).join('、') }}
+            </span>
+          </div>
+          <button class="btn btn-ghost btn-sm" @click="goPolicy(item.has_newer ? item.newer_document_id! : item.document_id)">
+            查看新版本
+          </button>
+        </article>
       </div>
     </section>
 
@@ -658,5 +710,51 @@ function goCalendar(item: CalendarItem) {
 .row:hover .row-arrow {
   opacity: 1;
   transform: none;
+}
+
+/* ---------- R15：政策更新 ---------- */
+.updates-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.warn-text {
+  color: var(--c-unknown);
+  font-weight: 600;
+}
+.update-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.update-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px var(--space-2);
+  border-radius: var(--radius-control);
+}
+.update-row:hover {
+  background: var(--c-surface-2);
+}
+.update-row.plan {
+  border-left: 2px solid var(--c-warn-border);
+}
+.update-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.update-title {
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-hint {
+  font-size: 11px;
+  color: var(--c-unknown);
 }
 </style>

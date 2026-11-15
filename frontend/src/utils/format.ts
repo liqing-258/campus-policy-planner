@@ -173,6 +173,6 @@ export const EFFECTIVE_LABEL: Record<string, string> = {
   active: '现行有效',
   superseded: '已被替代',
   expired: '已失效',
-  unknown: '未标注',
+  unknown: '暂未确认',
 }
 
