@@ -326,7 +326,7 @@ cd campus-policy-planner
 scripts\setup.bat            # macOS/Linux: bash scripts/setup.sh
 ```
 
-`setup.bat` 依次做五件事：建 `.venv` → 装依赖 → 复制 `.env` → 建 15 张表 → 写入演示账号。
+`setup.bat` 依次做五件事：建 `.venv` → 装依赖 → 复制 `.env` → 建 16 张表 → 写入演示账号。
 每步失败即中止并打印原因。
 
 然后两个终端分别：
@@ -372,9 +372,9 @@ python -c "import secrets;print(secrets.token_hex(32))"
 
 ```
 [db] sqlite:///.../data/app.db
-[db] 表数量：13 / 期望 13
+[db] 表数量：16 / 期望 16
 [db] PRAGMA foreign_keys=1  journal_mode=wal
-[ok] 建表完成，共 15 张表
+[ok] 建表完成，共 16 张表
 [add ] student  role=student  password=student123
 [add ] admin    role=admin    password=admin123
 [ok] 用户总数：2
@@ -718,7 +718,7 @@ python tools/seed_demo.py --reset
 **当前实际可跑的命令**（R16 状态，全部实测）：
 
 ```bash
-# 全部测试（436 项，本机约 420 秒；--basetemp 把临时目录放进项目内，绕开 "pytest 收尾清 %TEMP% 被沙箱拦" 那个坑）
+# 全部测试（456 项，本机约 480 秒；--basetemp 把临时目录放进项目内，绕开 "pytest 收尾清 %TEMP% 被沙箱拦" 那个坑）
 .venv\Scripts\python.exe -m pytest
 
 # 按文件跑：规则抽取 / 三态匹配 / 计划与任务（M5 共 54 项）
@@ -780,7 +780,7 @@ cd frontend && npm run typecheck && npm run build
 | 解包仓库（`git archive HEAD`） | 3.1 s | 156 个条目 |
 | 建 venv | 32.7 s | Python 3.13 |
 | **装后端依赖** | **246.4 s** | 占总量 71%。本机 pip 有 2 GB 热缓存；**冷缓存会更久** |
-| 建表（`tools/init_db.py`） | 1.4 s | 15 张表 |
+| 建表（`tools/init_db.py`） | 1.4 s | 16 张表 |
 | 写演示账号（`tools/seed_demo.py`） | 1.4 s | student / admin |
 | 导入演示政策（`tools/seed_demo_versions.py`） | 1.8 s | 6 份文件，含 2025/2026 两版 |
 | 生成演示计划与任务（`tools/seed_demo_flow.py`） | 0.6 s | 11 条任务，五态铺开 |
@@ -842,7 +842,7 @@ campus-policy-planner/
 │   ├── errors.py               # ✅ 错误码与异常体系
 │   ├── runtime.py              # ✅ 请求内/脚本外统一的配置访问
 │   ├── schemas.py              # ✅ pydantic v2 请求契约
-│   ├── models.py               # ✅ SQLAlchemy 模型（15 张表）
+│   ├── models.py               # ✅ SQLAlchemy 模型（16 张表）
 │   ├── auth.py                 # ✅ JWT、角色守卫、登录
 │   ├── health.py               # ✅ /health
 │   ├── documents.py            # ✅ M3 上传 / 列表 / 删除 / 重解析 / 片段（M6 加改元数据）
@@ -914,8 +914,8 @@ campus-policy-planner/
 已实现条数不允许手填，用脚本导出核对：
 
 ```bash
-.venv\Scripts\python.exe tools\dump_routes.py --expect 52
-# 合计 52 条  按方法：DELETE 2 / GET 28 / PATCH 6 / POST 16
+.venv\Scripts\python.exe tools\dump_routes.py --expect 56
+# 合计 56 条  按方法：DELETE 3 / GET 30 / PATCH 6 / POST 17
 ```
 
 除 `/health`、`/auth/login` 外需 `Authorization: Bearer <token>`。
@@ -1157,7 +1157,7 @@ AI 生成的任务可能遗漏或过度解读。让用户先看、先改、再�
 | `docs/10-需求分析/PRD.md` | P0/P1/P2、10 条用户故事与可判定验收标准、需求追溯矩阵（V1.1） |
 | `docs/10-需求分析/用户旅程.md` | 两角色、五道断裂、情绪曲线、三个关键时刻、旅程→功能覆盖检查 |
 | `docs/20-系统设计/系统设计说明书.md` | **主文档**：架构、流程、数据、接口、AI 策略、安全、测试、部署（V3.3，含 §8.12 R12 指南、§8.13 R13 推荐、§8.14 R14 日历、§8.15 R15 政策更新、§8.16 R16 评价与纠错、§8.17 R17 常用政策收藏） |
-| `docs/20-系统设计/数据模型.md` | 15 张表字段、枚举、状态机、SQLite 约定（V1.7，含 §3.14 `calendar_events`、§3.15 `correction_feedback`、§4.6 反馈枚举、`qa_feedback` 幂等迁移注记） |
+| `docs/20-系统设计/数据模型.md` | 16 张表字段、枚举、状态机、SQLite 约定（V1.8，含 §3.14 `calendar_events`、§3.15 `correction_feedback`、§3.16 `favorites`、§4.6 反馈枚举、§4.7 收藏目标枚举、`qa_feedback` 幂等迁移注记） |
 | `docs/30-接口契约/接口契约统一规范.md` | 外壳、错误码、分页、幂等、鉴权（V1.1，码表补登 1006/2008/2009/2010/2011 五个码） |
 | `docs/30-接口契约/接口清单.md` | 56 条接口 × 角色 × 里程碑 × 错误码（V1.19，含 M3–M6 偏差登记、R12 三条只读接口与 `2011`、R13 推荐 #39、R14 日历 #40–#44、R15 政策更新 #45–#48、R16 反馈 #49–#52、R17 收藏 #53–#56 与 §2.16） |
 | `docs/60-交付/运行说明.md` | 安装、启动、M2–M7 验证清单、故障排查（V3.3，含 §4.30 收藏接口实测与四条读数常识、§5.18 R17 排查） |
