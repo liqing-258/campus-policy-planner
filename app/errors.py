@@ -134,6 +134,17 @@ class MessageNotFound(ApiError):
     code = codes.MESSAGE_NOT_FOUND
 
 
+# ---------- R12：校园事务指南 ----------
+class GuideNotFound(ApiError):
+    """指南事项 key 不存在。
+
+    与 `DocumentNotFound` 分开：事项是**指南层的编目条目**，不是政策文件本身。
+    报"文档不存在"会把用户引到知识库去找一份其实存在的政策。
+    """
+
+    code = codes.GUIDE_NOT_FOUND
+
+
 # ---------- 权限 ----------
 class Unauthenticated(ApiError):
     code = codes.UNAUTHENTICATED

@@ -51,6 +51,7 @@ def create_app(overrides: dict | None = None) -> Flask:
     from app import analytics as analytics_mod
     from app import auth as auth_mod
     from app import documents as documents_mod
+    from app import guides as guides_mod
     from app import health as health_mod
     from app import matching as matching_mod
     from app import plans as plans_mod
@@ -62,6 +63,9 @@ def create_app(overrides: dict | None = None) -> Flask:
     app.register_blueprint(health_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(auth_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(documents_mod.bp, url_prefix=API_PREFIX)
+    # 校园事务指南（R12）只读：正文实时取自 documents / document_chunks，
+    # 没有自己的表，因此不需要迁移，也不会与知识库产生第二份真值
+    app.register_blueprint(guides_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(qa_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(rules_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(matching_mod.bp, url_prefix=API_PREFIX)

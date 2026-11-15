@@ -25,6 +25,7 @@ PARSE_IN_PROGRESS = 2007     # 409 解析进行中
 RULES_NOT_READY = 2008       # 200 没有已复核规则，无法匹配（业务态）
 MESSAGE_NOT_FOUND = 2009     # 404 消息或工作流记录不存在
 USER_DUPLICATED = 2010       # 409 学号已被注册
+GUIDE_NOT_FOUND = 2011       # 404 校园事务指南事项不存在
 
 UNAUTHENTICATED = 3001       # 401 未登录或令牌过期
 FORBIDDEN = 3002             # 403 无权限
@@ -64,6 +65,7 @@ CODE_HTTP: dict[int, int] = {
     RULES_NOT_READY: 200,
     MESSAGE_NOT_FOUND: 404,
     USER_DUPLICATED: 409,
+    GUIDE_NOT_FOUND: 404,
     UNAUTHENTICATED: 401,
     FORBIDDEN: 403,
     INSUFFICIENT_EVIDENCE: 200,
@@ -95,6 +97,7 @@ CODE_MESSAGES: dict[int, str] = {
     RULES_NOT_READY: "该文件还没有已复核的规则，无法匹配；请管理员先抽取并复核规则",
     MESSAGE_NOT_FOUND: "消息或工作流记录不存在",
     USER_DUPLICATED: "该学号已注册，请直接登录",
+    GUIDE_NOT_FOUND: "该事务事项不存在或已下线",
     UNAUTHENTICATED: "未登录或登录已过期",
     FORBIDDEN: "没有权限执行该操作",
     INSUFFICIENT_EVIDENCE: "未在政策库中找到足够依据，无法给出可靠回答",
