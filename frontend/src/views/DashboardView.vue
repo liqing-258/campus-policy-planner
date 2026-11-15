@@ -21,6 +21,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   api,
+  type CalendarAgenda,
+  type CalendarItem,
   type ConversationRow,
   type DocumentRow,
   type Health,
@@ -49,17 +51,21 @@ const conversations = ref<ConversationRow[]>([])
 const plans = ref<PlanRow[]>([])
 const documents = ref<DocumentRow[]>([])
 const stats = ref<TaskStats | null>(null)
+const agenda = ref<CalendarAgenda | null>(null)
 const loading = ref(true)
 const error = ref('')
 
 onMounted(async () => {
-  const [h, t, c, p, d, s] = await Promise.allSettled([
+  const [h, t, c, p, d, s, g] = await Promise.allSettled([
     api.get<Health>('/health'),
     api.get<Paged<TaskRow>>('/tasks?page=1&page_size=14'),
     api.get<Paged<ConversationRow>>('/conversations?page=1&page_size=10'),
     api.get<Paged<PlanRow>>('/plans?page=1&page_size=10'),
     api.get<Paged<DocumentRow>>('/documents?page=1&page_size=10'),
     api.get<TaskStats>('/tasks/stats'),
+    // 窗口天数固定 7：与 /tasks/stats 的 due_soon 同一口径，
+    // 两处不一致时用户会看到"7 天内到期 3 项"但这里只列 2 条
+    api.get<CalendarAgenda>('/calendar/agenda?days=7'),
   ])
   if (h.status === 'fulfilled') health.value = h.value
   if (t.status === 'fulfilled') tasks.value = t.value.items
@@ -68,7 +74,8 @@ onMounted(async () => {
   // 只列能检索到内容的文件：空文本与扫描件留在知识库里，但在工作台上只会让人误点
   if (d.status === 'fulfilled') documents.value = d.value.items.filter((doc) => doc.chunk_count > 0)
   if (s.status === 'fulfilled') stats.value = s.value
-  const failure = [h, t, c, p, d, s].find((r) => r.status === 'rejected') as
+  if (g.status === 'fulfilled') agenda.value = g.value
+  const failure = [h, t, c, p, d, s, g].find((r) => r.status === 'rejected') as
     | PromiseRejectedResult
     | undefined
   if (failure) {
@@ -116,6 +123,11 @@ const today = computed(() =>
 
 const overdueTone = computed(() => ((stats.value?.overdue ?? 0) > 0 ? 'danger' : 'ok'))
 
+/** 工作台上的日程：逾期 + 未来 7 天 + 待确认年份三类，都来自 /calendar/agenda */
+const agendaOverdue = computed(() => agenda.value?.overdue ?? [])
+const agendaSoon = computed(() => agenda.value?.soon ?? [])
+const agendaUndated = computed(() => agenda.value?.undated ?? [])
+
 function dueText(task: TaskRow) {
   if (!task.due_at) return '无明确截止'
   return `截止 ${formatDate(task.due_at)}`
@@ -130,6 +142,19 @@ function dueText(task: TaskRow) {
  */
 function go(path: string) {
   void router.push(path)
+}
+
+/**
+ * 点工作台上的日程：有日期的落到那个月的日历，没有日期的落到日历页的
+ * 「待确认」栏。不要统一跳 `/calendar`——用户点的是"11 月 20 日那条"，
+ * 落到当月才叫跳对了。
+ */
+function goCalendar(item: CalendarItem) {
+  if (!item.date) {
+    void router.push('/calendar')
+    return
+  }
+  void router.push({ path: '/calendar', query: { month: item.date.slice(0, 7) } })
 }
 </script>
 
@@ -175,6 +200,84 @@ function go(path: string) {
       和一套草稿弹层。放在四个统计数下面、六个列表卡上面——它是"我接下来该做什么"
       的答案，比"我的待办"更靠前，但低于"待办 5 项"这类一眼可读的状态数。
     -->
+    <!--
+      近期重要日程（R14）：逾期 → 未来 7 天 → 年份待确认，顺序就是处理顺序。
+      三类都是"现在能动手的事"，与下面的「我的待办」不同：后者是全量列表，
+      这里是按时间窗口筛过的。
+    -->
+    <section class="card agenda-card">
+      <div class="list-head">
+        <h3>近期重要日程</h3>
+        <span class="muted tiny">
+          未来 7 天 {{ agenda?.counts.soon ?? 0 }} 项
+          <template v-if="(agenda?.counts.overdue ?? 0) > 0">
+            · <span class="danger-text">逾期 {{ agenda?.counts.overdue }} 项</span>
+          </template>
+        </span>
+        <router-link class="agenda-more" to="/calendar">打开校园日历 →</router-link>
+      </div>
+
+      <div v-if="agendaOverdue.length || agendaSoon.length" class="agenda-grid">
+        <div v-if="agendaOverdue.length" class="agenda-col">
+          <h4 class="agenda-h danger-text">已逾期（{{ agendaOverdue.length }}）</h4>
+          <div
+            v-for="item in agendaOverdue.slice(0, 4)"
+            :key="item.id"
+            class="arow overdue"
+            role="button"
+            tabindex="0"
+            @click="goCalendar(item)"
+            @keydown.enter="goCalendar(item)"
+          >
+            <span class="adate mono">{{ item.date?.slice(5) }}</span>
+            <span class="atitle">{{ item.title }}</span>
+            <span class="tag not-met">逾期</span>
+          </div>
+        </div>
+        <div v-if="agendaSoon.length" class="agenda-col">
+          <h4 class="agenda-h">未来 7 天（{{ agendaSoon.length }}）</h4>
+          <div
+            v-for="item in agendaSoon.slice(0, 4)"
+            :key="item.id"
+            class="arow"
+            role="button"
+            tabindex="0"
+            @click="goCalendar(item)"
+            @keydown.enter="goCalendar(item)"
+          >
+            <span class="adate mono">{{ item.date?.slice(5) }}</span>
+            <span class="atitle">{{ item.title }}</span>
+            <span class="tag plain">{{ item.category_label }}</span>
+          </div>
+        </div>
+      </div>
+      <p v-else-if="agenda" class="empty small">
+        未来 7 天没有到期的待办。
+      </p>
+      <p v-else class="empty small">{{ loading ? '读取中…' : '日程暂不可用' }}</p>
+
+      <div v-if="agendaUndated.length" class="undated-box">
+        <div class="undated-head">
+          <strong>年份待确认 {{ agenda?.counts.undated_year_missing ?? 0 }} 条</strong>
+          <span class="muted tiny">
+            政策原文只给了月日、没给年份。系统不替你补，补完才会进入日历。
+          </span>
+        </div>
+        <div class="uchips">
+          <button
+            v-for="item in agendaUndated"
+            :key="item.id"
+            class="uchip"
+            :title="item.title"
+            @click="goCalendar(item)"
+          >
+            <span class="mono">{{ item.raw_text }}</span>
+            <span class="utext">{{ item.title }}</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
     <RecommendPanel />
 
     <div class="grid">
@@ -385,6 +488,127 @@ function go(path: string) {
 
 .bar-foot {
   margin: var(--space-3) 0 0;
+}
+
+/* ---------- 近期重要日程（R14） ---------- */
+.danger-text {
+  color: var(--c-not-met);
+  font-weight: 600;
+}
+
+.agenda-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.agenda-more {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--c-primary);
+}
+
+.agenda-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.agenda-h {
+  margin: 0 0 var(--space-1);
+  font-size: 12px;
+  color: var(--c-text-2);
+  font-weight: 600;
+}
+
+.arow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 5px var(--space-2);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.arow:hover {
+  background: var(--c-surface-2);
+}
+
+.arow.overdue {
+  border-left: 2px solid var(--c-not-met);
+}
+
+.adate {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--c-text-2);
+}
+
+.atitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.undated-box {
+  border-top: 1px dashed var(--c-border);
+  padding-top: var(--space-2);
+}
+
+.undated-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
+.undated-head strong {
+  font-size: 12.5px;
+  color: var(--c-unknown);
+}
+
+.uchips {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.uchip {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--c-warn-border);
+  background: var(--c-warn-bg);
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.uchip .mono {
+  color: var(--c-unknown);
+  font-size: 11px;
+  flex: none;
+}
+
+.utext {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .agenda-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* 列表行：原来是 <li>，现在要在自动滚动的容器里既当列表项又当按钮。

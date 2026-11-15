@@ -6,6 +6,7 @@
  * 这里只是把"能点哪个按钮"提前算出来，避免用户点完才被告知非法。
  */
 import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ApiError, api, type Paged, type PlanRow, type TaskRow } from '../api/client'
 import {
   PLAN_STATUS_LABEL,
@@ -15,6 +16,7 @@ import {
   formatTime,
 } from '../utils/format'
 
+const route = useRoute()
 const plans = ref<PlanRow[]>([])
 const planTotal = ref(0)
 const statusFilter = ref('')
@@ -36,7 +38,13 @@ async function loadPlans() {
     const data = await api.get<Paged<PlanRow>>(`/plans?${params}`)
     plans.value = data.items
     planTotal.value = data.total
-    if (!activePlan.value && data.items.length) await openPlan(data.items[0])
+    if (!activePlan.value && data.items.length) {
+      // `/plans?plan=<id>` 是日历"打开计划"进来的深链。找不到就退回第一条——
+      // 计划可能已被归档而当前筛选是"已确认"，此时停在一个空白详情页更糟。
+      const wanted = String(route.query.plan ?? '')
+      const hit = data.items.find((row) => row.id === wanted)
+      await openPlan(hit ?? data.items[0])
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '计划加载失败'
   } finally {
