@@ -50,6 +50,7 @@ def create_app(overrides: dict | None = None) -> Flask:
     # ---- 蓝图 ----
     from app import analytics as analytics_mod
     from app import auth as auth_mod
+    from app import calendar as calendar_mod
     from app import documents as documents_mod
     from app import guides as guides_mod
     from app import health as health_mod
@@ -75,6 +76,10 @@ def create_app(overrides: dict | None = None) -> Flask:
     app.register_blueprint(recommend_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(plans_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(tasks_mod.bp, url_prefix=API_PREFIX)
+    # 校园日历（R14）：任务与个人日程在接口层合并成一种形状。
+    # 个人日程需要一张表（tasks.plan_id 是 NOT NULL，且 create_all 不改老库），
+    # 任务侧零新表、零新列，改期与完成都走既有的 /tasks 接口
+    app.register_blueprint(calendar_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(workflows_mod.bp, url_prefix=API_PREFIX)
     # 管理看板独立一个蓝图：它是只读聚合，与 workflows 的写入路径没有关系
     app.register_blueprint(analytics_mod.bp, url_prefix=API_PREFIX)

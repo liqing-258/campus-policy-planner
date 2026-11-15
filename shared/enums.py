@@ -179,6 +179,62 @@ PRIORITY_P2 = "P2"
 PRIORITY_P3 = "P3"
 PRIORITIES = (PRIORITY_P0, PRIORITY_P1, PRIORITY_P2, PRIORITY_P3)
 
+# ---------- R14：校园日历 ----------
+# 六类日程。**存库的只有个人日程的 category**（`calendar_events.category`）；
+# 任务侧的类别按 `rule_type + 所属文档标题` 实时推断，不落库：
+# 规则重新抽取、文件换版之后，落库的分类会立刻变成过期数据，
+# 而推断每次都是按当前规则算的。这条与 R13「不建推荐表」同源。
+CAL_SCHOLARSHIP = "scholarship"   # 奖学金 / 助学金申请截止
+CAL_AWARD = "award"               # 评奖评优
+CAL_EXAM = "exam"                 # 考试报名
+CAL_MATERIAL = "material"         # 材料提交
+CAL_LIBRARY = "library"           # 图书借阅与归还
+CAL_PERSONAL = "personal"         # 学生自己添加的个人事务
+CAL_OTHER = "other"               # 认不出类别的政策事务（兜底，不硬塞进上面五类）
+
+CALENDAR_CATEGORIES = (
+    CAL_SCHOLARSHIP, CAL_AWARD, CAL_EXAM,
+    CAL_MATERIAL, CAL_LIBRARY, CAL_PERSONAL, CAL_OTHER,
+)
+
+CALENDAR_CATEGORY_LABELS = {
+    CAL_SCHOLARSHIP: "奖学金截止",
+    CAL_AWARD: "评奖评优",
+    CAL_EXAM: "考试报名",
+    CAL_MATERIAL: "材料提交",
+    CAL_LIBRARY: "图书归还",
+    CAL_PERSONAL: "个人事务",
+    CAL_OTHER: "其他事务",
+}
+
+# 日期来源三态。**不猜年份**这条要求在这里的落点：只有拿到日期的条目
+# 才谈得上"日期从哪来"；没有日期的一律进"待确认"清单，不进日历格子。
+DATE_SOURCE_POLICY = "policy"        # 政策原文给了完整年月日
+DATE_SOURCE_CONFIRMED = "confirmed"  # 原文只给月日，学生补了年份
+DATE_SOURCE_MANUAL = "manual"        # 学生完全自己定的
+DATE_SOURCES = (DATE_SOURCE_POLICY, DATE_SOURCE_CONFIRMED, DATE_SOURCE_MANUAL)
+
+DATE_SOURCE_LABELS = {
+    DATE_SOURCE_POLICY: "政策原文",
+    DATE_SOURCE_CONFIRMED: "你补全年份",
+    DATE_SOURCE_MANUAL: "手动填写",
+}
+
+# 没有日期时"缺的到底是什么"。三种缺法必须给三种说法：
+# 混成一句"未设置日期"，会让「原文给了 9 月 10 日、只缺年份」看起来像
+# 「原文一个日期都没提」——前者只差一个数字，后者要学生自己去问学院。
+UNDATED_YEAR_MISSING = "year_missing"   # 原文有月日、缺年份 —— 绝不能自己补
+UNDATED_NO_DATE = "no_date_in_policy"   # 原文一个日期都没给
+UNDATED_NOT_SET = "not_set"             # 这条任务本来就没要求日期
+UNDATED_REASONS = (UNDATED_YEAR_MISSING, UNDATED_NO_DATE, UNDATED_NOT_SET)
+
+UNDATED_REASON_LABELS = {
+    UNDATED_YEAR_MISSING: "年份待确认",
+    UNDATED_NO_DATE: "原文未给日期",
+    UNDATED_NOT_SET: "未设置日期",
+}
+
+
 # ---------- 画像字段白名单（数据模型 §4.4）----------
 # 模型与前端都不得引入白名单外的字段：`family_income`、`id_card` 这类字段
 # 一旦入库，就是"多采集了一份个人信息"，删库都不算挽回。

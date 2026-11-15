@@ -1,4 +1,4 @@
-"""ORM 模型：13 张表。
+"""ORM 模型：14 张表。
 
 字段与索引的唯一权威来源是 docs/20-系统设计/数据模型.md。
 本文件不写业务逻辑，只做结构映射；改字段前先改文档。
@@ -351,9 +351,49 @@ class AuditLog(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
 
+# ------------------------------------------------------- 3.14 calendar_events
+class CalendarEvent(db.Model):
+    """学生自己添加的日程（R14 校园日历）。
+
+    **为什么不复用 tasks**
+
+    `tasks.plan_id` 是 `NOT NULL` 外键，而"周三去图书馆还书"不属于任何一份
+    政策计划。两条绕开的路都不通：
+
+    1. 给 tasks 加列 / 放开 NOT NULL —— 项目用 `db.create_all()` 建表，
+       老库不会被自动改结构；加列会让已经升级过的库启动即报 `no such column`，
+       改约束要重建整张表（12 步），风险远超收益。
+    2. 为个人事务伪造一条 action_plan 与一份 document —— `PRAGMA foreign_keys=ON`
+       是真的在生效，伪造的 document_id 要么外键失败，要么在知识库里多出一份
+       不存在的"政策"，污染检索与推荐。
+
+    所以个人日程单独一张表。它与任务在**接口层**合并成一个日程流，
+    前端只认一种形状；`kind` 字段说明它来自哪一边。
+
+    日期用 `db.Date` 而不是 `db.DateTime`：日程是"哪一天"，
+    存成 DateTime 反而要处理时区与"00:00 属于哪一天"的问题。
+    """
+
+    __tablename__ = "calendar_events"
+    __table_args__ = (
+        db.Index("idx_event_user_date", "user_id", "event_date"),
+    )
+
+    id = db.Column(db.String(26), primary_key=True)
+    user_id = db.Column(db.String(26), db.ForeignKey("users.id"), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    note = db.Column(db.String(500))
+    event_date = db.Column(db.Date, nullable=False)
+    # "HH:MM"，可空。为空表示"这一天，具体时间未定"，前端不显示时间
+    event_time = db.Column(db.String(5))
+    category = db.Column(db.String(24), nullable=False, default="personal")
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+
+
 # 供 tools/init_db.py 与测试断言使用
 ALL_MODELS = (
     User, Document, DocumentChunk, Conversation, Message, PolicyRule,
     MatchSession, MatchResultItem, ActionPlan, Task, WorkflowRun,
-    QaFeedback, AuditLog,
+    QaFeedback, AuditLog, CalendarEvent,
 )

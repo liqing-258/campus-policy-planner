@@ -421,3 +421,61 @@ class TaskStatusRequest(StrictModel):
     def _status(cls, value):
         from shared.enums import TASK_STATUSES
         return _check_in(value, TASK_STATUSES, "任务状态")
+
+
+# ---------------------------------------------------------------- R14：校园日历
+class CalendarEventCreateRequest(StrictModel):
+    """学生手动添加的日程。
+
+    `date` 只收 `YYYY-MM-DD`：日程是"哪一天"，不是"哪个时刻"。
+    收 ISO 时间会逼着调用方编一个时区，而日历的格子只认日期。
+    """
+
+    title: str = Field(min_length=1, max_length=100)
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    note: str | None = Field(default=None, max_length=500)
+    category: str = "personal"
+
+    @field_validator("category")
+    @classmethod
+    def _category(cls, value):
+        from shared.enums import CALENDAR_CATEGORIES
+        return _check_in(value, CALENDAR_CATEGORIES, "日程类型")
+
+    @field_validator("date")
+    @classmethod
+    def _date_valid(cls, value: str) -> str:
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            raise ValueError("date 不是合法日期（应为 YYYY-MM-DD）")
+        return value
+
+
+class CalendarEventPatchRequest(StrictModel):
+    """改日程。字段全部可选；`time` 传空串表示"取消具体时间"。"""
+
+    title: str | None = Field(default=None, min_length=1, max_length=100)
+    date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    # 空串是合法的：它表示"取消具体时间"，与"没传这个字段（不动）"是两件事
+    time: str | None = Field(default=None, pattern=r"^$|^([01]\d|2[0-3]):[0-5]\d$")
+    note: str | None = Field(default=None, max_length=500)
+    category: str | None = None
+
+    @field_validator("category")
+    @classmethod
+    def _category(cls, value):
+        from shared.enums import CALENDAR_CATEGORIES
+        return _check_in(value, CALENDAR_CATEGORIES, "日程类型")
+
+    @field_validator("date")
+    @classmethod
+    def _date_valid(cls, value):
+        if value is None:
+            return value
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            raise ValueError("date 不是合法日期（应为 YYYY-MM-DD）")
+        return value
