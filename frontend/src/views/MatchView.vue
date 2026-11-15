@@ -9,7 +9,7 @@
  * 匹配完全不调模型（设计 §7.6）：同一个人填同样的画像，结果必须每次都一样，
  * 而且能追溯到政策原文的那一条。所以这一页不会出现"AI 判断"字样。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   ApiError,
@@ -29,6 +29,7 @@ import {
   UNKNOWN_REASON_LABEL,
   evidenceLabel,
 } from '../utils/format'
+import { toConfirmPayload } from '../utils/plan'
 import { GRADE_MAX_BY_TYPE, GRADE_MIN, useMatchStore } from '../stores/match'
 
 const documents = ref<DocumentRow[]>([])
@@ -431,27 +432,11 @@ async function confirmDraft() {
   confirming.value = true
   error.value = ''
   try {
-    const payload = {
-      title: draft.value.title,
-      tasks: draft.value.tasks.map((t) => ({
-        temp_id: t.temp_id,
-        title: t.title,
-        description: t.description,
-        priority: t.priority,
-        due_at: t.due_at,
-        required_materials: t.required_materials,
-        dependency_ids: t.dependency_ids,
-        // 溯源元数据原样回传：不回传的话，任务落库后就查不回是哪条规则、
-        // 也说不清"为什么截止日期是空的"（后端 tasks 表有对应列）
-        source_rule_code: t.source_rule_code,
-        due_source: t.due_source,
-        note: t.note,
-        needs_human_confirmation: t.needs_human_confirmation,
-      })),
-    }
+    // 映射只在 utils/plan.ts 里写一份：R13 的推荐卡片也要"生成办理计划"，
+    // 两边各抄一遍，早晚一边记得回传 source_rule_code、另一边忘了
     const plan = await api.post<{ plan_id: string; task_count: number }>(
       `/plans/${draft.value.plan_id}/confirm`,
-      payload,
+      toConfirmPayload(draft.value),
     )
     match.confirmedId = plan.plan_id
     draft.value = null
@@ -526,6 +511,20 @@ onMounted(async () => {
   if (fromQuery && documents.value.some((doc) => doc.id === fromQuery)) {
     match.documentId = fromQuery
     match.persist()
+  }
+
+  // R13：推荐卡片的「进行资格匹配」还会带奖项（`?target_group=`）。
+  // **必须等上面那次 documentId 变更触发的 watch 跑完再设**——那个 watch 的职责是
+  // "换了文件就清掉奖项"，同步写会在下一拍被它当成"用户换了文件"清掉，
+  // 表现就是"从推荐点进去，奖项没选上"。
+  const group = typeof route.query.target_group === 'string' ? route.query.target_group : ''
+  if (group) {
+    await nextTick()
+    // 只接受这份文件里真实存在的奖项：否则下拉框会显示成空白（value 指向不存在的 option）
+    if ((groupsByDoc.value[match.documentId] ?? []).includes(group)) {
+      match.targetGroup = group
+      match.persist()
+    }
   }
 })
 

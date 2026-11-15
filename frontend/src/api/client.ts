@@ -796,3 +796,134 @@ export interface GuideOverview {
   }
   notice: string
 }
+
+// ============================================================ R13：政策推荐
+/**
+ * 三态与资格匹配共用 `MatchStatus`：`met` / `not_met` / `unknown`。
+ * 推荐页的文案是「可能符合 / 暂不符合 / 暂无法判断」，由后端 `status_label` 给出，
+ * 前端不再维护第二套映射——两处各写一遍，迟早出现同一个结论两种说法。
+ */
+export type RecommendStatus = MatchStatus
+
+export interface RecommendEvidence {
+  chunk_id: string
+  page: number | null
+  section: string | null
+  article: string | null
+  /** 逐字取自 document_chunks，已去掉页脚与章节标题 */
+  text: string
+  quote: string
+}
+
+export interface RecommendConditionResult {
+  rule_code: string
+  field_key: string | null
+  description: string
+  status: RecommendStatus
+  status_label: string
+  unknown_reason: UnknownReason | null
+  user_value: string | null
+  expected_value: string | null
+  rationale: string
+  evidence: { chunk_id: string; page: number | null; section: string | null; quote: string }
+}
+
+export interface RecommendAudience {
+  text: string
+  section: string | null
+  article: string | null
+  quote: string
+}
+
+/**
+ * 卡片上的三个动作。`available` 由后端预判：
+ * 没复核规则时匹配会吃 2008，生成计划会混入同文件其他奖项的材料，
+ * 与其让用户点过去撞一次，不如在卡片上就说清为什么不能点。
+ */
+export interface RecommendAction {
+  available: boolean
+  document_id: string | null
+  reason: string | null
+}
+
+export interface RecommendDetailAction extends RecommendAction {
+  /** guide = 有指南详情页；document = 直接打开知识库里的那份文件 */
+  kind: 'guide' | 'document' | null
+  guide_key: string | null
+  path: string | null
+}
+
+export interface RecommendCard {
+  key: string
+  title: string
+  category: string
+  category_label: string
+  kind: 'award' | 'support'
+  status: RecommendStatus
+  status_label: string
+  /** code 说明"为什么是这个结论"；highlights 是逐条理由（带两个数字的那种） */
+  reason: { code: string; text: string; highlights: string[] }
+  conditions: RecommendConditionResult[]
+  conditions_preview: string
+  conditions_available: boolean
+  conditions_source: 'rules' | 'policy' | null
+  condition_counts: {
+    met: number
+    not_met: number
+    unknown: number
+    approved: number
+    pending: number
+    rejected: number
+  }
+  missing_fields: string[]
+  missing_labels: string[]
+  audience: RecommendAudience | null
+  evidence: RecommendEvidence | null
+  document: GuideDocument | null
+  target_group: string | null
+  note: string | null
+  ask: string
+  actions: {
+    detail: RecommendDetailAction
+    match: RecommendAction & { target_group: string | null; approved_condition_rules: number }
+    plan: RecommendAction & { approved_rules: number }
+  }
+  score: number
+  rank: number
+  sort_basis: string[]
+}
+
+export interface RecommendProfile {
+  source: 'latest_match' | 'none'
+  session_id: string | null
+  document_id: string | null
+  document_title: string | null
+  submitted_at: string | null
+  fields: Record<string, unknown>
+  filled: number
+  total: number
+  completeness: number
+  missing_fields: string[]
+  missing_labels: string[]
+}
+
+export interface RecommendData {
+  profile: RecommendProfile
+  summary: {
+    total: number
+    met: number
+    not_met: number
+    unknown: number
+    cataloged: number
+    excluded: number
+    empty: boolean
+  }
+  items: RecommendCard[]
+  excluded: { key: string; title: string; code: string; reason: string }[]
+  coverage: { label: string; status: 'covered' | 'missing' | 'excluded'; subject_key: string | null; note: string }[]
+  notices: { level: 'info' | 'warn'; code: string; text: string }[]
+  empty_title: string
+  empty_hint: string
+  disclaimer: string
+  generated_at: string
+}

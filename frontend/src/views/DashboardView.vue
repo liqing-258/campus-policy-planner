@@ -31,6 +31,7 @@ import {
 } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import AutoScrollList from '../components/AutoScrollList.vue'
+import RecommendPanel from '../components/RecommendPanel.vue'
 import {
   EFFECTIVE_LABEL,
   PLAN_STATUS_LABEL,
@@ -168,6 +169,13 @@ function go(path: string) {
         <span class="d">分母不含已取消</span>
       </div>
     </div>
+
+    <!--
+      「为你推荐」（R13）：整块单独一个组件，因为它有自己的一次请求、一组筛选
+      和一套草稿弹层。放在四个统计数下面、六个列表卡上面——它是"我接下来该做什么"
+      的答案，比"我的待办"更靠前，但低于"待办 5 项"这类一眼可读的状态数。
+    -->
+    <RecommendPanel />
 
     <div class="grid">
       <!-- 近期待办 -->
