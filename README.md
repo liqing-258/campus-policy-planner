@@ -903,7 +903,7 @@ campus-policy-planner/
 已实现条数不允许手填，用脚本导出核对：
 
 ```bash
-.venv\Scripts\python.exe tools\dump_routes.py --expect 39
+.venv\Scripts\python.exe tools\dump_routes.py --expect 44
 # 合计 44 条  按方法：DELETE 2 / GET 23 / PATCH 5 / POST 14
 ```
 
