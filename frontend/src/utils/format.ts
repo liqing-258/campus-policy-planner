@@ -191,3 +191,11 @@ export const EFFECTIVE_LABEL: Record<string, string> = {
   unknown: '暂未确认',
 }
 
+/** 收藏对象类型 → 中文。与后端 FAVORITE_TARGETS 一一对应。 */
+export const FAVORITE_TARGET_LABEL: Record<string, string> = {
+  document: '政策文件',
+  guide: '校园事务指南',
+  qa: '重要问答',
+  plan: '常用办理事项',
+}
+

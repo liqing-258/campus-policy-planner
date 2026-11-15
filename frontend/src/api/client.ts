@@ -1176,3 +1176,77 @@ export interface AdminFeedbackStats {
   status: { pending: number; processing: number; resolved: number }
   generated_at: string
 }
+
+/* ============================================================
+   常用政策收藏（R17）
+   收藏是一张 user + target 关联表；这里只描述形状。四类目标：
+   document=政策文件 / guide=校园事务指南 / qa=重要问答 / plan=常用办理事项。
+   列表项里的 document/effective_status 是后端实时 JOIN 出来的，
+   「政策更新后同步有效状态」与「问答保留原始回答来源」都靠它现算。
+   ============================================================ */
+
+export type FavoriteTarget = 'document' | 'guide' | 'qa' | 'plan'
+
+export interface FavoriteDocument {
+  id: string
+  title: string
+  effective_status: string
+  academic_year: string | null
+  version_label: string | null
+  department: string | null
+}
+
+/** 问答来源引用（与 qa.py 的 citations_json 同源，收藏列表里带出） */
+export interface FavoriteCitation {
+  index: number
+  document_id: string
+  document_title: string
+  page_number: number | null
+  section_title: string | null
+  snippet: string
+}
+
+export interface FavoriteItem {
+  id: string
+  target_type: FavoriteTarget
+  target_type_label: string
+  target_id: string
+  /** 收藏时的名称快照；目标删除后仍能显示 */
+  title: string
+  created_at: string | null
+  /** 关联政策文件（实时；目标被下架则为 null） */
+  document: FavoriteDocument | null
+  /** 政策有效状态（实时） */
+  effective_status: string | null
+  // qa 特有：原始问题 + 原始回答 + 来源 + 回答时间
+  question: string | null
+  answer: string | null
+  citations: FavoriteCitation[] | null
+  answered_at: string | null
+  conversation_id: string | null
+  // plan 特有
+  plan_status: string | null
+}
+
+export interface FavoriteCreateResult {
+  id: string
+  target_type: FavoriteTarget
+  target_type_label: string
+  target_id: string
+  title: string
+  document_id: string | null
+  /** true = 已存在，本次是覆盖快照 */
+  updated: boolean
+  created_at: string | null
+}
+
+export interface FavoriteIds {
+  ids: string[]
+  count: number
+}
+
+export interface FavoriteList extends Paged<FavoriteItem> {
+  type: string | null
+  query: string
+  types: { id: FavoriteTarget; label: string }[]
+}

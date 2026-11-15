@@ -10,6 +10,7 @@ import {
 } from '../api/client'
 import { useMatchStore } from './match'
 import { useQAStore } from './qa'
+import { useFavoriteStore } from './favorites'
 
 /**
  * 用户信息也写进 localStorage（`zxx_user`）。
@@ -124,6 +125,7 @@ export const useAuthStore = defineStore('auth', {
     logout() {
       useQAStore().clear()
       useMatchStore().clearAll()
+      useFavoriteStore().reset()
       this.token = null
       this.user = null
       setToken(null)
