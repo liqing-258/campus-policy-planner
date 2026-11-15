@@ -10,6 +10,7 @@ import GuideDetailView from './views/GuideDetailView.vue'
 import MatchView from './views/MatchView.vue'
 import PlansView from './views/PlansView.vue'
 import CalendarView from './views/CalendarView.vue'
+import FavoritesView from './views/FavoritesView.vue'
 import RulesView from './views/RulesView.vue'
 import AdminView from './views/AdminView.vue'
 
@@ -47,6 +48,8 @@ const router = createRouter({
     { path: '/plans', name: 'plans', component: PlansView, meta: { title: '计划与任务' } },
     // 校园日历（R14）：读的是 tasks 表本身，个人日程在 calendar_events
     { path: '/calendar', name: 'calendar', component: CalendarView, meta: { title: '校园日历' } },
+    // 常用政策收藏（R17）：一张 user+target 关联表，四类目标实时 JOIN 展示
+    { path: '/favorites', name: 'favorites', component: FavoritesView, meta: { title: '我的收藏' } },
     // 数据中心是 R9 新增的管理员专属页：后端两条接口都挂了 @admin_required
     { path: '/admin', name: 'admin', component: AdminView, meta: { adminOnly: true, title: '数据中心' } },
     { path: '/rules', name: 'rules', component: RulesView, meta: { adminOnly: true, title: '规则管理' } },

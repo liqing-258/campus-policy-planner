@@ -104,7 +104,11 @@ const navGroups = computed(() => {
     },
     {
       title: '政策资料',
-      items: [{ to: '/library', label: '政策知识库', icon: '▣' }],
+      items: [
+        { to: '/library', label: '政策知识库', icon: '▣' },
+        // 收藏是个人常用信息库，与知识库并列：一个看「全部政策」，一个看「我常用的」
+        { to: '/favorites', label: '我的收藏', icon: '★' },
+      ],
     },
   ]
   if (auth.isAdmin) {
