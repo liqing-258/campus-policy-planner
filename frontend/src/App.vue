@@ -98,6 +98,8 @@ const navGroups = computed(() => {
         { to: '/ask', label: '智能问答', icon: '?' },
         { to: '/match', label: '资格匹配', icon: '◎' },
         { to: '/plans', label: '计划与任务', icon: '☑' },
+        // 日历排在计划之后：先看"要做什么"，再看"排在哪天"
+        { to: '/calendar', label: '校园日历', icon: '▩' },
       ],
     },
     {

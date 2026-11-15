@@ -9,6 +9,7 @@ import GuideView from './views/GuideView.vue'
 import GuideDetailView from './views/GuideDetailView.vue'
 import MatchView from './views/MatchView.vue'
 import PlansView from './views/PlansView.vue'
+import CalendarView from './views/CalendarView.vue'
 import RulesView from './views/RulesView.vue'
 import AdminView from './views/AdminView.vue'
 
@@ -44,6 +45,8 @@ const router = createRouter({
     { path: '/ask', name: 'ask', component: AskView, meta: { title: '智能问答' } },
     { path: '/match', name: 'match', component: MatchView, meta: { title: '资格匹配' } },
     { path: '/plans', name: 'plans', component: PlansView, meta: { title: '计划与任务' } },
+    // 校园日历（R14）：读的是 tasks 表本身，个人日程在 calendar_events
+    { path: '/calendar', name: 'calendar', component: CalendarView, meta: { title: '校园日历' } },
     // 数据中心是 R9 新增的管理员专属页：后端两条接口都挂了 @admin_required
     { path: '/admin', name: 'admin', component: AdminView, meta: { adminOnly: true, title: '数据中心' } },
     { path: '/rules', name: 'rules', component: RulesView, meta: { adminOnly: true, title: '规则管理' } },

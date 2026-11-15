@@ -69,6 +69,13 @@
   --c-info: #1f6ea8;
   --c-purple: #6b4fbb;
 
+  /* R14 日历：个人事务用洋红。既有的五种语义色（青/紫/蓝/棕/绿）已被
+     奖学截止、评优、考试、材料、图书五类占满；再借红或橙会和「逾期」「警告」
+     撞车，借灰又会和「其他事务」撞车。 */
+  --c-cal-personal: #a03a7a;
+  --c-cal-personal-bg: rgba(160, 58, 122, 0.1);
+  --c-cal-personal-border: rgba(160, 58, 122, 0.32);
+
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;

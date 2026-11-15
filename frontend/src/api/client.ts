@@ -927,3 +927,118 @@ export interface RecommendData {
   disclaimer: string
   generated_at: string
 }
+
+/* ============================================================
+   校园日历（R14）
+   日历没有第二个任务库：`kind === 'task'` 的条目就是 tasks 表的一行，
+   改期与完成都走既有的 /tasks 接口。`kind === 'event'` 才是新表
+   （个人日程），`kind === 'policy'` 是"政策里写了时间、但还没生成任务"。
+   ============================================================ */
+
+export type CalendarCategory =
+  | 'scholarship'
+  | 'award'
+  | 'exam'
+  | 'material'
+  | 'library'
+  | 'personal'
+  | 'other'
+
+/** 日期从哪来。`confirmed` = 原文只给月日、学生补了年份 */
+export type CalendarDateSource = 'policy' | 'confirmed' | 'manual'
+
+/** 没有日期时缺的到底是什么。三种缺法三句话，不能合并 */
+export type UndatedReason = 'year_missing' | 'no_date_in_policy' | 'not_set'
+
+export interface CalendarItem {
+  id: string
+  /** task = 我的待办；event = 个人日程；policy = 政策里的时间节点（尚未生成任务） */
+  kind: 'task' | 'event' | 'policy'
+  ref_id: string
+  title: string
+  /** `YYYY-MM-DD`。待确认条目为 null —— 不猜年份，所以它没有日期 */
+  date: string | null
+  time: string | null
+  due_at: string | null
+  status: string
+  done: boolean
+  cancelled: boolean
+  overdue: boolean
+  priority: string | null
+  date_source: CalendarDateSource | null
+  date_source_label: string
+  date_confirmed_by_user: boolean
+  category: CalendarCategory
+  category_label: string
+  plan_id: string | null
+  plan_title: string | null
+  document_id: string | null
+  document_title: string | null
+  description: string | null
+  required_materials: string | null
+  note: string | null
+  needs_human_confirmation: boolean
+  completed_at: string | null
+  /** 原文里的月日原样，如「9 月 10 日」；只对待确认条目有值 */
+  raw_text: string | null
+  undated_reason: UndatedReason | null
+  undated_reason_label: string | null
+  /** 只有个人日程能改能删；任务的改期走 /tasks/{id}，删除不在本期范围 */
+  editable: boolean
+  deletable: boolean
+  index?: number
+}
+
+export interface CalendarCategoryCount {
+  key: CalendarCategory
+  label: string
+  count: number
+}
+
+export interface CalendarData {
+  range: { from: string; to: string; days: number }
+  /** 服务器本地日期，用来给"今天"画圈；不要用浏览器时区另算一个 */
+  today: string
+  items: CalendarItem[]
+  undated: CalendarItem[]
+  counts: {
+    total: number
+    done: number
+    overdue: number
+    undated: number
+    by_day: Record<string, number>
+    by_category: Record<CalendarCategory, number>
+    undated_by_category: Record<CalendarCategory, number>
+  }
+  categories: CalendarCategoryCount[]
+  notice: string
+  generated_at: string
+}
+
+export interface CalendarAgenda {
+  today: string
+  window_days: number
+  overdue: CalendarItem[]
+  soon: CalendarItem[]
+  /** 只含「年份待确认」这一类：其余两类在工作台没有可操作性 */
+  undated: CalendarItem[]
+  counts: {
+    overdue: number
+    soon: number
+    undated: number
+    undated_year_missing: number
+  }
+  generated_at: string
+}
+
+export interface CalendarEventRow {
+  id: string
+  title: string
+  date: string
+  time: string | null
+  note: string | null
+  category: CalendarCategory
+  category_label: string
+  created_at: string | null
+  updated_at: string | null
+}
