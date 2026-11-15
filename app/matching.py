@@ -29,7 +29,8 @@ from app.auth import current_user, login_required
 from app.contract import body_json, new_ulid, ok
 from app.documents import _get_active_or_404
 from app.errors import ApiError, Forbidden, RulesNotReady
-from app.models import DocumentChunk, MatchResultItem, MatchSession, PolicyRule, db
+from app.models import Document, DocumentChunk, MatchResultItem, MatchSession, PolicyRule, db
+from app import versions
 from app.schemas import MatchRequest, validate
 from shared.codes import DOCUMENT_NOT_FOUND
 from shared.enums import (
@@ -391,6 +392,8 @@ def run_match(document_id: str, payload: dict, user) -> dict:
     return {
         "session_id": session.id,
         "document_id": document.id,
+        # R15：该文件存在多个版本时提醒核对（不判哪版对，见 versions.version_note_for）
+        "version_note": versions.version_note_for(document),
         "summary": {
             "met": session.sum_met,
             "not_met": session.sum_not_met,
@@ -454,9 +457,11 @@ def load_session(session_id: str, user) -> dict:
             },
         })
 
+    match_doc = db.session.get(Document, session.document_id)
     return {
         "session_id": session.id,
         "document_id": session.document_id,
+        "version_note": versions.version_note_for(match_doc) if match_doc else None,
         "profile": json.loads(session.profile_json or "{}"),
         "summary": {
             "met": session.sum_met,

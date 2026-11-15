@@ -40,8 +40,11 @@ from app.models import AuditLog, Document, DocumentChunk, db
 from app.parsing import parse_document
 from app.runtime import current_settings
 from app.schemas import effective_status, optional_date, optional_text
+from app import versions
 from shared.enums import (
+    EFFECTIVE_ACTIVE,
     EFFECTIVE_STATUSES,
+    EFFECTIVE_SUPERSEDED,
     FILE_TYPE_BY_EXT,
     MAGIC_PDF,
     MAGIC_ZIP,
@@ -81,6 +84,7 @@ def _serialize(doc: Document) -> dict:
         "academic_year": doc.academic_year,
         "version_label": doc.version_label,
         "effective_status": doc.effective_status,
+        "supersedes_id": doc.supersedes_id,
         "scope_note": doc.scope_note,
         "parse_status": doc.parse_status,
         "chunk_count": doc.chunk_count,
@@ -295,7 +299,11 @@ def upload():
         doc.parse_error = f"解析时出现未预期错误：{type(exc).__name__}"
         db.session.commit()
 
-    return ok(_serialize(doc), http_status=201)
+    payload = _serialize(doc)
+    # R15：上传完成即提示"是否属于政策更新"。只提示、不自动建联——
+    # 未经管理员确认的文件不会被标成现行有效，也不会顶替旧版。
+    payload["possible_updates"] = versions.candidates_for(doc.title, exclude_id=doc.id)
+    return ok(payload, http_status=201)
 
 
 @bp.get("/documents")
@@ -381,6 +389,101 @@ def update_document(document_id: str):
     _audit("document.update", "document", doc.id, json.dumps({"fields": sorted(data)}))
     db.session.commit()
     return ok(_serialize(doc))
+
+
+@bp.get("/documents/version-candidates")
+@admin_required
+def version_candidates():
+    """上传预检：与给定标题同主题或高度相似的既有文件（R15）。
+
+    存在同主题文件**不是错误**——政策本来就该有新旧版本，所以不拦上传，
+    只回答"像不像政策更新"。判断与建联是管理员的事，这里只给候选。
+    """
+    title = optional_text(request.args.get("title"), "title")
+    if not title:
+        raise InvalidParam("缺少 title 参数")
+    return ok(versions.candidates_for(title))
+
+
+@bp.get("/documents/<document_id>/versions")
+@login_required
+def document_versions(document_id: str):
+    """同一政策的全部版本（主题组 ∪ 人工 supersedes 链），新在前（R15）。
+
+    学生与管理员都能看：历史版本公开是溯源的一部分。
+    """
+    doc = _get_active_or_404(document_id)
+    family = versions.related_versions(doc)
+    # "最新版本"优先取人工链上替代了这一版的那份（见 versions.replacer_of）
+    newest = versions.replacer_of(doc, family) or (family[0] if family else doc)
+    active = [d for d in family if d.effective_status == EFFECTIVE_ACTIVE]
+    if len(active) == 1:
+        hint = f"当前标注「现行有效」的是《{active[0].title}》。"
+    elif not active:
+        hint = "没有任何一版被标注「现行有效」，请以最新版原文为准并咨询发布部门。"
+    else:
+        hint = "多份文件都被标注「现行有效」，标注本身存在冲突，请人工核对。"
+    return ok({
+        "document_id": doc.id,
+        "newest_document_id": newest.id,
+        "count": len(family),
+        "versions": [
+            dict(versions.brief(d), is_current=(d.id == doc.id))
+            for d in family
+        ],
+        "hint": hint,
+    })
+
+
+@bp.post("/documents/<document_id>/version-link")
+@admin_required
+def version_link(document_id: str):
+    """管理员确认版本关系（R15）：一次做三件事。
+
+    1. 新版记 `supersedes_id`（谁替代了谁）；
+    2. 旧版标「已被替代」；
+    3. 新版标"相应有效状态"（默认「现行有效」，可显式传其他值）。
+
+    **这是全仓唯一能把文件标成「现行有效」的自动动作**，而它只由管理员
+    显式调用触发——"不得自动将未经管理员确认的文件标记为现行有效"因此成立：
+    上传不改状态、预检不改状态、只有这一条接口改，且带审计。
+    """
+    doc = _get_active_or_404(document_id)
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        raise InvalidParam("请求体必须是 JSON 对象")
+
+    old_id = optional_text(data.get("supersedes_id"), "supersedes_id")
+    if not old_id:
+        raise InvalidParam("supersedes_id 不能为空")
+    if old_id == doc.id:
+        raise InvalidParam("不能把文件关联为自己的历史版本")
+    old = db.session.get(Document, old_id)
+    if old is None or old.deleted_at is not None:
+        raise DocumentNotFound("被替代的旧版本不存在")
+
+    # 防环：沿旧版的 supersedes 链走，能走回 doc 就说明会成环
+    cursor, guard = old, 0
+    while cursor is not None and guard < 20:
+        if cursor.id == doc.id:
+            raise InvalidParam("该关联会形成版本环：新版本已是旧版本的历史版本")
+        nxt = cursor.supersedes_id
+        cursor = db.session.get(Document, nxt) if nxt else None
+        guard += 1
+
+    new_status = effective_status(data.get("new_status", EFFECTIVE_ACTIVE))
+    doc.supersedes_id = old.id
+    old.effective_status = EFFECTIVE_SUPERSEDED
+    doc.effective_status = new_status
+    doc.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    old.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    _audit("document.version-link", "document", doc.id,
+           json.dumps({"supersedes_id": old.id, "new_status": new_status}))
+    db.session.commit()
+    return ok({
+        "document": _serialize(doc),
+        "superseded": _serialize(old),
+    })
 
 
 @bp.delete("/documents/<document_id>")

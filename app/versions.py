@@ -35,6 +35,8 @@ from dataclasses import dataclass
 from datetime import date
 
 from app.models import Document, db
+from shared.enums import EFFECTIVE_ACTIVE
+from shared.enums import EFFECTIVE_ACTIVE
 
 # 标题规范化时要去掉的东西。顺序有讲究：先去掉括号内容再去年份，
 # 否则「（2025年修订）」里的年份会因为括号已删而漏掉——这里处理不了，
@@ -215,3 +217,189 @@ def detect(candidates: list) -> list[dict]:
             "hint": _hint(group, newest),
         })
     return conflicts
+
+
+# ============================================================ R15：版本组与相似候选
+def brief(doc: Document) -> dict:
+    """版本列表里用的精简序列化。字段少而全：打开详情走 /documents/{id}。"""
+    return {
+        "document_id": doc.id,
+        "title": doc.title,
+        "file_type": doc.file_type,
+        "department": doc.department,
+        "published_at": doc.published_at.isoformat() if doc.published_at else None,
+        "academic_year": doc.academic_year,
+        "version_label": doc.version_label,
+        "effective_status": doc.effective_status or "unknown",
+        "supersedes_id": doc.supersedes_id,
+        "created_at": doc.created_at.isoformat() + "Z",
+    }
+
+
+def group_of(doc: Document) -> list[Document]:
+    """同一政策的全部版本（含自己）：规范化标题相同且主题长度达标。
+
+    **只比标题，不聚类**——理由与 `detect` 相同：误报的版本提示比没有更糟。
+    与 `detect` 的差别是范围：`detect` 只在本次检索候选里判，这里是**全库**，
+    因为详情页的"历史版本"必须把库里所有同主题版本都列出来。
+    """
+    topic = normalize_title(doc.title)
+    if len(topic) < MIN_TOPIC_LEN:
+        return []
+    rows = db.session.execute(
+        db.select(Document).where(Document.deleted_at.is_(None))
+    ).scalars().all()
+    group = [d for d in rows if normalize_title(d.title) == topic]
+    group.sort(key=lambda d: _Version(
+        document_id=d.id, title=d.title, year=year_of(d.title, d.academic_year),
+        academic_year=d.academic_year,
+        published_at=d.published_at.isoformat() if d.published_at else None,
+        effective_status=d.effective_status or "unknown",
+        version_label=d.version_label, topic=topic,
+    ).sort_key, reverse=True)
+    return group
+
+
+def newest_of(group: list[Document]) -> Document | None:
+    return group[0] if group else None
+
+
+def _bigrams(text: str) -> set[str]:
+    return {text[i:i + 2] for i in range(len(text) - 1)}
+
+
+def similarity(a: str, b: str) -> float:
+    """标题相似度：规范化主题的字符二元组 Jaccard。"""
+    ba, bb = _bigrams(a), _bigrams(b)
+    if not ba or not bb:
+        return 0.0
+    return len(ba & bb) / len(ba | bb)
+
+
+# 弱信号阈值：0.55。两份完全无关的中文标题通常 < 0.2；同一政策改名（如加"试行"）
+# 常见 0.5–0.8。这个阈值只决定"要不要提示管理员看一眼"，不自动建任何关联——
+# 提示错了最多多点一次"无关"，建错了会让旧版凭空"已被替代"。
+WEAK_THRESHOLD = 0.55
+
+
+def candidates_for(title: str, exclude_id: str | None = None) -> dict:
+    """上传预检：与 `title` 同主题（强信号）或高度相似（弱信号）的既有文件。
+
+    强 = 规范化标题完全相同；弱 = 一方主题包含另一方（均 ≥ MIN_TOPIC_LEN）
+    或相似度 ≥ WEAK_THRESHOLD。**两档分开返回**：管理员对强信号要认真核对，
+    对弱信号扫一眼即可，混在一起会把强信号淹掉。
+    """
+    topic = normalize_title(title)
+    rows = db.session.execute(
+        db.select(Document).where(Document.deleted_at.is_(None))
+    ).scalars().all()
+    strong: list[dict] = []
+    weak: list[dict] = []
+    for doc in rows:
+        if exclude_id and doc.id == exclude_id:
+            continue
+        other = normalize_title(doc.title)
+        if len(topic) < MIN_TOPIC_LEN or len(other) < MIN_TOPIC_LEN:
+            continue
+        if topic == other:
+            item = brief(doc)
+            item["match"] = "same_topic"
+            strong.append(item)
+            continue
+        contained = (topic in other or other in topic)
+        sim = similarity(topic, other)
+        if contained or sim >= WEAK_THRESHOLD:
+            item = brief(doc)
+            item["match"] = "similar"
+            item["similarity"] = round(sim, 2)
+            weak.append(item)
+    strong.sort(key=lambda d: d["created_at"], reverse=True)
+    weak.sort(key=lambda d: d.get("similarity", 0), reverse=True)
+    return {"strong": strong, "weak": weak[:8]}
+
+
+def related_versions(doc: Document) -> list[Document]:
+    """完整版本家族：主题组 **并** 人工建立的 supersedes 链（两个方向）。
+
+    为什么要并集：标题改过名的两个版本主题比对不出来，但管理员显式建过
+    `supersedes_id` 关联——人工判断的可信度高于字符串比对，链上的一律算进来。
+    """
+    found: dict[str, Document] = {d.id: d for d in group_of(doc)}
+    found[doc.id] = doc
+
+    # 下游：我替代了谁，谁又替代了谁（沿 supersedes_id 往回走）
+    cursor = doc.supersedes_id
+    guard = 0
+    while cursor and guard < 20:
+        row = db.session.get(Document, cursor)
+        if row is None or row.id in found:
+            break
+        found[row.id] = row
+        cursor = row.supersedes_id
+        guard += 1
+
+    # 上游：谁替代了我（把全库 supersedes_id 指向我的接进来，再递归一层层收）
+    rows = db.session.execute(
+        db.select(Document).where(Document.deleted_at.is_(None))
+    ).scalars().all()
+    by_target: dict[str, list[Document]] = {}
+    for row in rows:
+        if row.supersedes_id:
+            by_target.setdefault(row.supersedes_id, []).append(row)
+    frontier = [doc.id]
+    guard = 0
+    while frontier and guard < 20:
+        nxt: list[str] = []
+        for target in frontier:
+            for row in by_target.get(target, []):
+                if row.id not in found:
+                    found[row.id] = row
+                    nxt.append(row.id)
+        frontier = nxt
+        guard += 1
+
+    family = sorted(found.values(), key=lambda d: (
+        d.published_at.isoformat() if d.published_at else "",
+        d.created_at.isoformat() if d.created_at else "",
+        d.id,
+    ), reverse=True)
+    return family
+
+
+def replacer_of(doc: Document, family: list[Document] | None = None) -> Document | None:
+    """谁替代了这一版：优先人工 supersedes 链，其次日期排序的头一个。
+
+    **人工判断优先于日期推断**：测试里出现过"旧版标了已被替代，但另一份
+    无发布日期的文件年份更大，于是横幅认为当前就是最新版"——
+    日期只在没人明确说过话的时候才作数。
+    """
+    family = family if family is not None else related_versions(doc)
+    return next((d for d in family if d.supersedes_id == doc.id), None) or (
+        family[0] if family and family[0].id != doc.id else None
+    )
+
+
+def version_note_for(doc: Document) -> dict | None:
+    """给匹配结果用的版本提醒：同主题/同链 ≥ 2 版才给，单版本返回 None。
+
+    文案只说"存在多个版本，请核对"，**不判断哪版该用**——除非标注了唯一一份
+    现行有效，否则连"应以哪版为准"都不说（见 `_hint` 同一原则）。
+    """
+    family = related_versions(doc)
+    if len(family) < 2:
+        return None
+    newest = replacer_of(doc, family) or family[0]
+    active = [d for d in family if d.effective_status == EFFECTIVE_ACTIVE]
+    if len(active) == 1:
+        hint = (f"知识库中有 {len(family)} 个版本；当前唯一标注「现行有效」的是"
+                f"《{active[0].title}》，判定前请核对使用的是否为该版本。")
+    else:
+        hint = (f"知识库中有 {len(family)} 个版本且有效状态未唯一确定，"
+                "请核对版本后再看判定结果，勿混用不同版本的条款。")
+    return {
+        "has_multiple": True,
+        "count": len(family),
+        "newest_document_id": newest.id,
+        "versions": [brief(d) for d in family[:6]],
+        "hint": hint,
+    }

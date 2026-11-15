@@ -56,6 +56,7 @@ def create_app(overrides: dict | None = None) -> Flask:
     from app import health as health_mod
     from app import matching as matching_mod
     from app import plans as plans_mod
+    from app import policy_updates as policy_updates_mod
     from app import qa as qa_mod
     from app import recommend as recommend_mod
     from app import rules as rules_mod
@@ -75,6 +76,9 @@ def create_app(overrides: dict | None = None) -> Flask:
     # 原文取 document_chunks，推荐本身是纯函数，没有自己的表也不需要迁移
     app.register_blueprint(recommend_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(plans_mod.bp, url_prefix=API_PREFIX)
+    # 政策更新提醒（R15）：只读。版本关系仍在 documents 上（supersedes_id），
+    # 这里只是把"最近变了什么"按学生视角聚合出来
+    app.register_blueprint(policy_updates_mod.bp, url_prefix=API_PREFIX)
     app.register_blueprint(tasks_mod.bp, url_prefix=API_PREFIX)
     # 校园日历（R14）：任务与个人日程在接口层合并成一种形状。
     # 个人日程需要一张表（tasks.plan_id 是 NOT NULL，且 create_all 不改老库），
