@@ -51,6 +51,7 @@ def create_app(overrides: dict | None = None) -> Flask:
     from app import analytics as analytics_mod
     from app import auth as auth_mod
     from app import calendar as calendar_mod
+    from app import favorites as favorites_mod
     from app import feedback as feedback_mod
     from app import documents as documents_mod
     from app import guides as guides_mod
@@ -84,6 +85,9 @@ def create_app(overrides: dict | None = None) -> Flask:
     # 办事评价与纠错反馈（R16）：答案评价仍走 qa.py 的既有接口，这里只挂
     # 纠错反馈的写入口 + 管理员反馈管理 + 统计；反馈不写正式政策内容
     app.register_blueprint(feedback_mod.bp, url_prefix=API_PREFIX)
+    # 常用政策收藏（R17）：一张 user+target 关联表，四类目标（政策/指南/问答/计划）
+    # 实时 JOIN 展示，不改动任何既有表；收藏数据按当前账号隔离
+    app.register_blueprint(favorites_mod.bp, url_prefix=API_PREFIX)
 
     # 校园日历（R14）：任务与个人日程在接口层合并成一种形状。
     # 个人日程需要一张表（tasks.plan_id 是 NOT NULL，且 create_all 不改老库），

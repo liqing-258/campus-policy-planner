@@ -526,3 +526,18 @@ class FeedbackAdminUpdateRequest(StrictModel):
         if self.status is None and self.admin_note is None:
             raise ValueError("status 与 admin_note 至少传一个")
         return self
+
+
+# ---------------------------------------------------------------- R17：常用政策收藏
+class FavoriteCreateRequest(StrictModel):
+    """收藏入参。只收 target_type + target_id——名称快照与关联政策由后端解析，
+    前端不传 title，避免「前端随手传一个名称」与后端真值不一致。"""
+
+    target_type: str
+    target_id: str = Field(min_length=1, max_length=64)
+
+    @field_validator("target_type")
+    @classmethod
+    def _target_type(cls, value):
+        from shared.enums import FAVORITE_TARGETS
+        return _check_in(value, FAVORITE_TARGETS, "收藏对象类型")
