@@ -34,6 +34,7 @@ import json
 from datetime import datetime, timezone
 
 from flask import Blueprint, request
+from sqlalchemy.exc import IntegrityError
 
 from app.auth import current_user, login_required
 from app.contract import new_ulid, ok, page_args, paginated
@@ -228,7 +229,24 @@ def create_favorite():
 
     _audit("favorite.create", row.id,
            json.dumps({"target_type": body.target_type, "target_id": body.target_id}))
-    db.session.commit()
+    # 并发下的 check-then-act 竞态：两个请求都查到"不存在"，第二个提交时撞唯一约束。
+    # 唯一约束挡住重复数据是对的（R19 并发实测：5 线程仍只留 1 条），但用户不该看到 500——
+    # 这个接口的语义本来就是幂等，所以回滚后重查一次，按"已收藏"返回 updated=true。
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        row = db.session.execute(
+            db.select(Favorite).where(
+                Favorite.user_id == user.id,
+                Favorite.target_type == body.target_type,
+                Favorite.target_id == body.target_id,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            # 不是唯一约束造成的（比如外键失败）：照原样抛，别把真错误吞成 200
+            raise
+        updated = True
 
     return ok({
         "id": row.id,

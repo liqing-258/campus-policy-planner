@@ -355,3 +355,22 @@ def test_favorite_title_snapshot_survives_document_delete(client, student_header
     assert item["title"] == "一份即将下架的政策"
     assert item["document"] is None
     assert item["effective_status"] is None
+
+
+# ============================================================ R19：并发写入的防线
+def test_favorites_unique_constraint_exists(app):
+    """数据层必须有 (user_id, target_type, target_id) 唯一约束。
+
+    为什么单独断言"约束存在"：R19 并发实测（5 线程同时 POST /favorites）里，
+    应用层的"先查再插"会同时查到"不存在"，最后只有唯一约束能挡住重复数据。
+    约束一旦被删（比如换库、手写迁移），应用层代码看起来没变，重复收藏却会悄悄出现。
+    """
+    from sqlalchemy import inspect
+    with app.app_context():
+        inspector = inspect(db.engine)
+        # 三元组写成的是 UniqueConstraint（表级约束），**不会**出现在 get_indexes() 里。
+        # 我第一次用 get_indexes() 断言，误判成"约束不存在"——查约束要用 get_unique_constraints()。
+        constraints = inspector.get_unique_constraints("favorites")
+    unique_sets = [set(c["column_names"]) for c in constraints]
+    assert any({"user_id", "target_type", "target_id"} <= cols for cols in unique_sets), \
+        f"favorites 缺少三元组唯一约束，实际约束：{constraints}"
