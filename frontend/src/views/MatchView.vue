@@ -228,22 +228,22 @@ const filledCount = computed(() =>
 
 async function loadDocuments() {
   try {
+    // R21：`match_ready=1` 让后端只返回"至少有一条已复核资格条件"的文件。
+    // 不在前端过滤，是因为"能不能匹配"的判据在后端（approved + 条件类），
+    // 前端再实现一遍就有两份真相；而且分页总数也得按过滤后的集合算。
     const data = await api.get<Paged<DocumentRow>>(
-      '/documents?page=1&page_size=50&parse_status=indexed',
+      '/documents?page=1&page_size=50&parse_status=indexed&match_ready=1',
     )
     // R20：每份文件的准备度随列表一起回来（`rule_summary`），不再逐个文件查规则。
-    // 之前那样做有两个代价：18 份文件 = 18 次往返；而且只拿到"0 条"这个数字，
-    // 分不清"没抽过 / 抽失败 / 抽了没复核 / 本来就不适用"。
-    documents.value = [...data.items].sort((a, b) => {
-      // 能直接匹配的排最前，其余按已复核条件数、再按片段数
-      const rank = (d: DocumentRow) => (d.rule_summary?.state === 'ready' ? 2 : 1)
-      const diff = rank(b) - rank(a)
-      if (diff) return diff
-      return (b.rule_summary?.approved_conditions ?? 0) - (a.rule_summary?.approved_conditions ?? 0)
-    })
-    if (!match.documentId) {
-      const best = documents.value.find((d) => d.rule_summary?.state === 'ready')
-      match.documentId = (best ?? documents.value[0])?.id ?? ''
+    documents.value = [...data.items].sort(
+      (a, b) =>
+        (b.rule_summary?.approved_conditions ?? 0) - (a.rule_summary?.approved_conditions ?? 0),
+    )
+    // 选中的文件必须仍在列表里：管理员撤掉某份政策的复核后，本地存着的 documentId
+    // 就成了"指向一个不该出现的选项"，直接用它请求会吃一个 2008。
+    const stillValid = documents.value.some((d) => d.id === match.documentId)
+    if (!stillValid) {
+      match.documentId = documents.value[0]?.id ?? ''
       match.persist()
     }
   } catch (err) {
@@ -601,15 +601,29 @@ watch(
     </header>
 
     <section class="card">
-      <div class="row">
+      <!-- R21：列表只含"已有一条以上已复核资格条件"的政策，所以这里的选项文案
+           回到三要素：名称 / 已复核条件数 / 片段数。状态标签不再重复——
+           能出现在这里本身就是"已具备匹配条件"。 -->
+      <div v-if="!documents.length && !error" class="match-empty">
+        <span class="match-empty-icon" aria-hidden="true">◍</span>
+        <p class="match-empty-title">当前没有可用于资格匹配的政策</p>
+        <p class="muted small">
+          资格匹配只列出「至少有一条已复核资格条件」的政策。目前管理员还没有完成任何一份的
+          条件抽取与复核，所以这里为空——这不是故障。
+        </p>
+        <p class="muted tiny">
+          可以先去「校园事务指南」看办理方式，或到「政策知识库」查阅原文；
+          管理员在「规则管理」里复核通过条件后，那份政策会自动出现在这里。
+        </p>
+      </div>
+      <div v-else class="row">
         <label class="field grow">
           <span>政策文件</span>
           <select v-model="match.documentId" class="select">
-            <option value="" disabled>选择一份已索引的文件</option>
+            <option value="" disabled>选择一份可用于匹配的政策</option>
             <option v-for="d in documents" :key="d.id" :value="d.id">
-              {{ d.title }}（{{ RULE_STATE[d.rule_summary?.state ?? 'pending_extract']?.label
-              }}<template v-if="(d.rule_summary?.approved_conditions ?? 0) > 0"> · 已复核条件 {{ d.rule_summary?.approved_conditions }} 条</template>
-              · {{ d.chunk_count }} 片段）
+              {{ d.title }}（已复核条件 {{ d.rule_summary?.approved_conditions ?? 0 }} 条 ·
+              {{ d.chunk_count }} 片段）
             </option>
           </select>
         </label>
@@ -1037,6 +1051,37 @@ watch(
   color: var(--c-not-met);
   font-size: 12.5px;
   line-height: 1.7;
+}
+
+/* R21：可匹配政策为空时的空状态。不用大段留白——给出"为什么空"和三条下一步 */
+.match-empty {
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  border: 1px dashed var(--c-border);
+  border-radius: var(--radius-control);
+  background: var(--c-surface-2);
+}
+.match-empty-icon {
+  display: block;
+  font-size: 26px;
+  line-height: 1;
+  color: var(--c-text-2);
+  margin-bottom: var(--space-2);
+}
+.match-empty-title {
+  margin: 0 0 var(--space-2);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+.match-empty p {
+  margin: 0 0 var(--space-2);
+  max-width: 620px;
+  margin-inline: auto;
+  line-height: 1.75;
+}
+.match-empty p:last-child {
+  margin-bottom: 0;
 }
 
 /* R20：文件准备度提示块。左边框取状态的色调，但**状态同时有文字标签**，
