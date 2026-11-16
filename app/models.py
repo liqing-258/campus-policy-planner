@@ -1,4 +1,4 @@
-"""ORM 模型：16 张表。
+"""ORM 模型：17 张表。
 
 字段与索引的唯一权威来源是 docs/20-系统设计/数据模型.md。
 本文件不写业务逻辑，只做结构映射；改字段前先改文档。
@@ -474,11 +474,57 @@ class Favorite(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
 
+# --------------------------------------------------- 3.16 document_rule_states（文档 §3.17）
+class DocumentRuleState(db.Model):
+    """文件级的「资格匹配准备度」记录（R20）。
+
+    **为什么不给 documents 加列**
+
+    这个状态包含两件**只能靠人/事件留下**的事实：
+
+    1. 管理员判定「这份政策不适用于资格匹配」+ 理由（食堂指南、违纪处分办法
+       这类文件本来就没有申请资格条件，强行抽只会抽出流程类规则，让学生误以为
+       自己"不符合"）；
+    2. 上一次抽取尝试的结果（失败原因必须留下来，否则"抽取失败"和"从没抽过"
+       在界面上完全一样——这正是 R20 的现场）。
+
+    加列要 ALTER 四张文档表的既有结构；项目 `db.create_all()` 只建缺失的表，
+    新表零迁移就能落地，且完全不动既有表——符合「不改动原有数据结构」的约束。
+    一对一共存不是浪费：**它是"事件与决定"的家，不是文档元数据**。
+
+    其余状态（已具备/待审核/待提取）一律**推导**，不落库：它们随规则表变化，
+    落库会在管理员复核后静默过期，而它没有"过期"标记。
+    """
+
+    __tablename__ = "document_rule_states"
+    __table_args__ = (
+        db.UniqueConstraint("document_id", name="uq_rule_state_document"),
+        db.Index("idx_rule_state_applicability", "applicability"),
+    )
+
+    id = db.Column(db.String(26), primary_key=True)
+    document_id = db.Column(db.String(26), db.ForeignKey("documents.id"), nullable=False)
+    # unclassified / applicable / not_applicable
+    applicability = db.Column(db.String(20), nullable=False, default="unclassified")
+    # 「不适用」的理由：给下一次看这份文件的人解释，不是给机器读
+    applicability_note = db.Column(db.String(500))
+    decided_by = db.Column(db.String(26), db.ForeignKey("users.id"))
+    decided_at = db.Column(db.DateTime)
+    # 上一次抽取尝试
+    last_attempt_at = db.Column(db.DateTime)
+    last_attempt_status = db.Column(db.String(16))  # succeeded / failed
+    last_attempt_message = db.Column(db.Text)
+    # 那次抽取落了多少条（含被丢弃的行数另记在 message 里，避免再开列）
+    last_attempt_rules = db.Column(db.Integer)
+    updated_at = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+
+
 # 供 tools/init_db.py 与测试断言使用
 ALL_MODELS = (
     User, Document, DocumentChunk, Conversation, Message, PolicyRule,
     MatchSession, MatchResultItem, ActionPlan, Task, WorkflowRun,
     QaFeedback, CorrectionFeedback, AuditLog, CalendarEvent, Favorite,
+    DocumentRuleState,
 )
 
 

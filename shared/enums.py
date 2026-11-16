@@ -116,6 +116,42 @@ EXTRACT_SUGGESTED = "suggested"
 EXTRACT_VERIFIED = "verified"
 EXTRACTION_STATUSES = (EXTRACT_SUGGESTED, EXTRACT_VERIFIED)
 
+# ---------- 文件级「资格匹配准备度」（R20）----------
+# 「0 条已复核条件」至少有四种完全不同的含义，此前它们在前端长得一模一样：
+#   ① 从没抽过  ② 抽了但失败  ③ 抽到了但还没复核  ④ 这份文件本来就没有申请资格条件
+# 前三种该催管理员去处理，第四种该直接告诉学生「不适用」。所以状态要能分辨。
+# 注意：这些是**推导出来**的状态，不落库（见 rules.derive_state），
+# 落库的只有两件人的决定/事件：不适用标记 与 上次抽取结果。
+RULE_STATE_READY = "ready"                    # 有已复核的资格条件，可匹配
+RULE_STATE_PENDING_REVIEW = "pending_review"  # 抽到了规则，但没有已复核的资格条件
+RULE_STATE_PENDING_EXTRACT = "pending_extract"  # 从未抽取过
+RULE_STATE_EXTRACT_FAILED = "extract_failed"  # 上次抽取失败
+RULE_STATE_NOT_APPLICABLE = "not_applicable"  # 管理员判定：不适用于资格匹配
+# 抽取成功但一条可用规则都没抽到（R20 实测《食堂与后勤生活服务指南》就是这种）。
+# 它与 pending_extract 的区别是**有没有试过**：没试过该去抽，试过没抽到该做判断
+# （要么确认不适用，要么换人工录入）。把它算进"待提取"会让管理员反复点同一个按钮。
+# 注意它仍是**待确认**状态，不是结论：模型"拿不准就不抽"时也会落到这里。
+RULE_STATE_NO_CONDITIONS = "no_conditions"
+RULE_STATES = (
+    RULE_STATE_READY, RULE_STATE_PENDING_REVIEW, RULE_STATE_PENDING_EXTRACT,
+    RULE_STATE_EXTRACT_FAILED, RULE_STATE_NOT_APPLICABLE, RULE_STATE_NO_CONDITIONS,
+)
+
+# 管理员对「这份政策是否参与资格匹配」的显式判定。unclassified = 还没人表态，
+# 此时由规则推导状态；一旦标了 not_applicable，它就是结论（但仍受数据约束：
+# 存在已复核资格条件时不许标不适用，见 rules.set_applicability）。
+APPLICABILITY_UNCLASSIFIED = "unclassified"
+APPLICABILITY_APPLICABLE = "applicable"
+APPLICABILITY_NOT_APPLICABLE = "not_applicable"
+APPLICABILITIES = (
+    APPLICABILITY_UNCLASSIFIED, APPLICABILITY_APPLICABLE, APPLICABILITY_NOT_APPLICABLE,
+)
+
+# 上一次抽取尝试的结果
+ATTEMPT_SUCCEEDED = "succeeded"
+ATTEMPT_FAILED = "failed"
+ATTEMPT_STATUSES = (ATTEMPT_SUCCEEDED, ATTEMPT_FAILED)
+
 # ---------- 三态匹配 ----------
 MATCH_MET = "met"
 MATCH_NOT_MET = "not_met"

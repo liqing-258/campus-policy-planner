@@ -182,6 +182,8 @@ def _to_result(data: dict, elapsed_ms: int, attempt: int, messages: list[dict],
                 f"模型只输出了推理内容（reasoning_tokens={reasoning}），正文为空——"
                 f"这次调用实际生效的 max_tokens={effective} 被推理耗尽，请调大对应的预算",
                 retriable=False,
+                # 结构化标记：调用方（如规则抽取）据此决定"是否值得加预算再试一次"
+                budget_exhausted=True,
             )
         raise LlmOutputInvalid(
             f"模型返回正文为空（finish_reason={choice.get('finish_reason')!r}）"

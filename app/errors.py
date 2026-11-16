@@ -170,15 +170,20 @@ class LlmOutputInvalid(ApiError):
 
     `retriable=False` 用于**重试也没用**的场合——典型是 max_tokens 被推理耗尽导致正文为空：
     参数不变的情况下再试一次必然同样空，白等一个 RTT 还可能多花一次 token 钱。
+
+    `budget_exhausted=True`（R20）是同一件事的**结构化表达**：调用方据此判断
+    "该不该把预算调大重试一次"。早期是按 `"被推理耗尽" in str(exc)` 匹配中文文案，
+    改一个字就断——报错文案是给人读的，不该同时当控制流。
     """
 
     code = codes.LLM_OUTPUT_INVALID
     retriable = True
 
     def __init__(self, message: str | None = None, *, retriable: bool | None = None,
-                 **kwargs) -> None:
+                 budget_exhausted: bool = False, **kwargs) -> None:
         if retriable is not None:
             self.retriable = retriable
+        self.budget_exhausted = budget_exhausted
         super().__init__(message, **kwargs)
 
 
