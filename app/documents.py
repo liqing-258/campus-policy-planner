@@ -36,12 +36,13 @@ from app.errors import (
     ParseInProgress,
 )
 from app.indexing import rebuild_index
-from app.models import AuditLog, Document, DocumentChunk, db
+from app.models import AuditLog, Document, DocumentChunk, PolicyRule, db
 from app.parsing import parse_document
 from app.runtime import current_settings
 from app.schemas import effective_status, optional_date, optional_text
 from app import versions
 from shared.enums import (
+    CONDITION_RULE_TYPES,
     EFFECTIVE_ACTIVE,
     EFFECTIVE_STATUSES,
     EFFECTIVE_SUPERSEDED,
@@ -56,6 +57,7 @@ from shared.enums import (
     PARSE_PARSING,
     PARSE_STATUSES,
     PARSE_UPLOADED,
+    REVIEW_APPROVED,
     SUPPORTED_EXTENSIONS,
     is_parse_transition_allowed,
 )
@@ -335,6 +337,30 @@ def list_documents():
     keyword = (request.args.get("q") or "").strip()
     if keyword:
         stmt = stmt.where(Document.title.contains(keyword))
+
+    # R21：`match_ready=1` 只返回"至少有一条已复核资格条件"的文件。
+    #
+    # 为什么由后端筛，而不是前端按 rule_summary 过滤：
+    #  ① 资格匹配的可用性判据（approved + 条件类）本来就在后端，前端再实现一遍就有两份真相；
+    #  ② 前端过滤会把不可匹配的文件也查出来、连片段一起传一遍，18 份变 3 份只是"看得见"的差别；
+    #  ③ 分页要按过滤后的集合算总数，前端过滤会让 total 与 items 对不上。
+    # 用 EXISTS 子查询而不是"先查 id 再 in_"：后者在 SQLite 上要为每个 id 拼参数，
+    # 文件一多就撞参数上限，且两次往返之间有窗口期。
+    match_ready = (request.args.get("match_ready") or "").strip().lower()
+    if match_ready:
+        if match_ready not in ("1", "0", "true", "false"):
+            raise InvalidParam("match_ready 只能是 1/0/true/false")
+        if match_ready in ("1", "true"):
+            ready_statement = (
+                db.select(PolicyRule.id)
+                .where(
+                    PolicyRule.document_id == Document.id,
+                    PolicyRule.review_status == REVIEW_APPROVED,
+                    PolicyRule.rule_type.in_(tuple(CONDITION_RULE_TYPES)),
+                )
+                .exists()
+            )
+            stmt = stmt.where(ready_statement)
 
     total = db.session.execute(
         db.select(func.count()).select_from(stmt.subquery())
