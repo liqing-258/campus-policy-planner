@@ -56,6 +56,8 @@ from shared.enums import (
     RULE_DEADLINE,
     RULE_MATERIAL,
     RULE_PROCESS,
+    TASK_CANCELLED,
+    TASK_DONE,
     TASK_TODO,
     UNKNOWN_MISSING_INFO,
     is_plan_transition_allowed,
@@ -406,8 +408,8 @@ def serialize_task(task: Task) -> dict:
     }
 
 
-def serialize_plan(plan: ActionPlan) -> dict:
-    return {
+def serialize_plan(plan: ActionPlan, task_counts: dict | None = None) -> dict:
+    payload = {
         "id": plan.id,
         "title": plan.title,
         "status": plan.status,
@@ -416,6 +418,36 @@ def serialize_plan(plan: ActionPlan) -> dict:
         "created_at": _iso(plan.created_at),
         "confirmed_at": _iso(plan.confirmed_at),
     }
+    # 只有列表接口传这个参数：单条详情（确认响应）自己就会带上任务数组，
+    # 再塞一份计数是重复信息，也给了"两处数字不一致"的机会。
+    if task_counts is not None:
+        payload["task_counts"] = task_counts
+    return payload
+
+
+def _task_counts_for(plan_ids: list[str]) -> dict[str, dict]:
+    """批量取每个计划的任务计数。一次 GROUP BY，避免"每个计划查一次"的 N+1。
+
+    `open` 排除已完成与已取消——和工作台 `/tasks/stats` 的 `open` 同一口径。
+    两处口径必须一致，否则计划卡片写"还剩 3 项"、工作台写"待办 2 项"，
+    用户会以为数据错了（这是 R19 顺手对齐的一处）。
+    """
+    if not plan_ids:
+        return {}
+    rows = db.session.execute(
+        db.select(Task.plan_id, Task.status, db.func.count())
+        .where(Task.plan_id.in_(plan_ids))
+        .group_by(Task.plan_id, Task.status)
+    ).all()
+    counts: dict[str, dict] = {}
+    for plan_id, status, count in rows:
+        bucket = counts.setdefault(plan_id, {"total": 0, "done": 0, "open": 0})
+        bucket["total"] += count
+        if status == TASK_DONE:
+            bucket["done"] += count
+        elif status != TASK_CANCELLED:
+            bucket["open"] += count
+    return counts
 
 
 # ---------------------------------------------------------------- 路由
@@ -450,7 +482,13 @@ def list_plans():
         stmt.order_by(ActionPlan.created_at.desc())
         .offset((page - 1) * page_size).limit(page_size)
     ).scalars().all()
-    return ok(paginated([serialize_plan(p) for p in rows], total, page, page_size))
+    # 列表页要显示每个计划的完成进度，所以顺带把任务计数一次查出来（不再让前端 N+1）
+    counts = _task_counts_for([plan.id for plan in rows])
+    return ok(paginated(
+        [serialize_plan(plan, counts.get(plan.id, {"total": 0, "done": 0, "open": 0}))
+         for plan in rows],
+        total, page, page_size,
+    ))
 
 
 @bp.patch("/plans/<plan_id>")

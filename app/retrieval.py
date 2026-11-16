@@ -22,12 +22,18 @@ from dataclasses import dataclass, field, replace
 from app import anchors, injection, versions
 from app.indexing import SearchHit, ensure_index_loaded, get_index, tokenize
 from app.runtime import current_settings
-from shared.enums import EMBEDDING_BM25_ONLY, EMBEDDING_VECTOR
+from shared.enums import EMBEDDING_BM25_ONLY, EMBEDDING_VECTOR, EFFECTIVE_SUPERSEDED
 
 # RRF 的平滑常数。k=60 是原论文与设计 §7.2 共同采用的值——
 # 它把"第 1 名"与"第 2 名"的差距压到很小，使得单路里的绝对名次
 # 不会因为另一路完全没召回而获得压倒性优势。
 RRF_K = 60
+
+# 「已被替代」版本的片段降权系数（设计说明书 §5 过滤规则第 1 条：降权 50%）。
+# 只作用于排序分 `score`，不动覆盖率 `coverage`——后者是相关性闸门，
+# 版本新旧不改变"这段文字与问题有多相关"。降 coverage 会把证据推进拒答分支，
+# 等于用"答不出"掩盖"答错版本"。
+SUPERSEDED_WEIGHT = 0.5
 
 
 @dataclass
@@ -59,6 +65,13 @@ class Candidate:
     via_anchor: bool = False
     # 片段在文件内的序号，补邻片时用它找前后邻居
     chunk_index: int = 0
+    # 所属文件的有效状态（active / superseded / expired / unknown）。
+    # 为什么要带到候选上：被标「已被替代」的片段若与现行版本一起进证据块，
+    # 模型看到的是两段互相矛盾的文字，而它无从判断哪段作数——实测会答"无法判断"。
+    # 状态必须跟着证据走，答案才可能给出效力判断。
+    effective_status: str | None = None
+    # 替代这份文件的新版标题（supersedes 链的下游）。链断时为空，不编造。
+    replaced_by: str | None = None
 
     def to_public(self, *, with_content: bool = True) -> dict:
         """对外序列化。内容可截断——列表场景不需要整段正文，详情接口才需要。"""
@@ -74,6 +87,9 @@ class Candidate:
             # 前端不必为它加图标，但接口里要能看出来：这条是"紧邻补全"，不是直接命中
             "via_neighbour": self.via_neighbour,
             "via_anchor": self.via_anchor,
+            # 版本效力：前端可据此给引用卡片打「已被替代」标签
+            "effective_status": self.effective_status,
+            "replaced_by": self.replaced_by,
         }
         if self.injection_hits:
             payload["injection"] = {
@@ -591,6 +607,15 @@ def retrieve(query: str, *, top_k: int | None = None,
 
     outcome.top_coverage = max(h.coverage for h in hits)
 
+    # 版本效力（设计 §5 过滤规则第 1 条）：superseded 片段降权 50%，并把状态随候选带走。
+    #
+    # 为什么降 score 而不是降 coverage：coverage 是"证据相关性"的闸门，版本新旧不改变
+    # 这段文字与问题有多相关。降 coverage 会把本来能过闸的证据推进拒答分支，
+    # 那是用一个错误（答不出）掩盖另一个错误（答错版本）。
+    #
+    # 一次批量查，不按候选逐条查——候选最多几十条，逐条查会把检索拖成 N+1。
+    status_map = versions.status_map(sorted({h.document_id for h in hits}))
+
     passed: list[Candidate] = []
     rejected: list[Candidate] = []
     for position, hit in enumerate(hits, 1):
@@ -600,6 +625,11 @@ def retrieve(query: str, *, top_k: int | None = None,
         coverage = injection.downweight(hit.coverage) if found else hit.coverage
         # 融合模式下多一道：所有召回路径都零命中的片段，覆盖率恒为 0，不能靠豁免混进证据块
         _zero_hit = bool(recall_paths) and _path_uncovered(hit.chunk_id, recall_paths)
+        meta = status_map.get(hit.document_id) or {}
+        effective = meta.get("effective_status")
+        score = hit.score
+        if effective == EFFECTIVE_SUPERSEDED:
+            score = hit.score * SUPERSEDED_WEIGHT
         candidate = Candidate(
             index=position,
             chunk_id=hit.chunk_id,
@@ -608,12 +638,14 @@ def retrieve(query: str, *, top_k: int | None = None,
             content=hit.content,
             page_number=hit.page_number,
             section_title=hit.section_title,
-            score=hit.score,
+            score=score,
             coverage=coverage,
             matched_terms=tuple(hit.matched_terms),
             injection_hits=tuple(found),
             raw_coverage=hit.coverage if found else None,
             chunk_index=hit.chunk_index,
+            effective_status=effective,
+            replaced_by=meta.get("replaced_by"),
         )
         if found:
             outcome.injection_suspected.append({

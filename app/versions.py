@@ -403,3 +403,47 @@ def version_note_for(doc: Document) -> dict | None:
         "versions": [brief(d) for d in family[:6]],
         "hint": hint,
     }
+
+
+def status_map(document_ids: list[str]) -> dict[str, dict]:
+    """批量取「有效状态 + 替代者标题」，供检索层给证据块加版本标注。
+
+    为什么放在这里而不是 retrieval.py：`documents` 的版本语义（包括
+    `新版.supersedes_id = 旧版.id` 这个方向）都集中在 versions.py。
+    检索层只消费结论，不该自己解释字段方向——否则哪天方向改了，
+    两处会各错一半。
+
+    返回形如 `{doc_id: {"effective_status": "superseded", "replaced_by": "…（2026年版）"}}`。
+    `replaced_by` 找不到时给 None：链断了（旧版本存在但新版没建关联）也是一条
+    需要如实呈现的事实，不能编一个标题出来。
+    """
+    if not document_ids:
+        return {}
+
+    rows = db.session.execute(
+        db.select(Document).where(Document.id.in_(document_ids))
+    ).scalars().all()
+    by_id = {row.id: row for row in rows}
+
+    replacers: dict[str, str] = {}
+    if by_id:
+        # 新版.supersedes_id 指向旧版，所以"谁替代了 X" = 查 supersedes_id == X 的文件
+        candidates = db.session.execute(
+            db.select(Document).where(Document.supersedes_id.in_(list(by_id)))
+        ).scalars().all()
+        for item in candidates:
+            if item.deleted_at is None and item.supersedes_id:
+                replacers.setdefault(item.supersedes_id, item.title)
+
+    result: dict[str, dict] = {}
+    for doc_id in document_ids:
+        row = by_id.get(doc_id)
+        if row is None:
+            # 片段还在索引里、文件已物理消失：状态未知，不假装是 active
+            result[doc_id] = {"effective_status": None, "replaced_by": None}
+            continue
+        result[doc_id] = {
+            "effective_status": row.effective_status or "unknown",
+            "replaced_by": replacers.get(doc_id),
+        }
+    return result

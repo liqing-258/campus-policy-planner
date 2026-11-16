@@ -70,6 +70,8 @@ from shared.codes import (
     LLM_OUTPUT_INVALID,
 )
 from shared.enums import (
+    EFFECTIVE_EXPIRED,
+    EFFECTIVE_SUPERSEDED,
     NODE_ANALYSIS,
     NODE_INTENT,
     NODE_MATCHING,
@@ -113,6 +115,10 @@ SYSTEM_PROMPT = """你是校园政策问答助手，服务对象是本校学生�
 5. **不要编造**文件名、页码、条款号、金额、日期。只复述证据里出现过的。
 6. **对话历史只用于理解指代**。历史里出现过的数字、日期、结论**不能作为本轮答案的依据**，
    也不构成引用；本轮所有结论仍须来自【证据片段】，引用编号只能来自本轮给出的 [1]..[N]。
+7. **按版本效力作答**。证据里标了【版本效力】的文件（"已被…替代"/"已失效"）不是现行标准：
+   ① 不得把它当作当前要求；② 若同一问题在证据里既有现行有效版、又有已被替代版，
+   **直接按现行有效版回答**，并一句话说明旧版已被替代，**不要回答"无法判断以哪版为准"**——
+   证据本身已经给出了哪版作数；③ 只有在证据里**找不到任何**现行有效版本时，才说明旧版已失效、建议核实。
 
 输出格式：只输出一个 JSON 对象，不要 Markdown 代码块，不要任何解释文字。字段如下：
 {
@@ -138,9 +144,41 @@ HISTORY_TEMPLATE = """【对话历史】（仅用于理解"它/那/还要"之类
 
 """
 
-EVIDENCE_ITEM = """[{index}] 文件《{title}》{location}
+EVIDENCE_ITEM = """[{index}] 文件《{title}》{location}{version_note}
 {content}
 """
+
+# 证据块里的版本标注。为什么必须写进证据而不是只放接口字段：
+# 模型看不到 API 响应里的 `conflicts`，它只看到这些文字。实测过不说的后果——
+# 2026 版（3.0）与 2025 版（2.8）同时进证据块时，答案会是"两版不同，无法判断"，
+# 而库里 `effective_status` 明明标了哪份现行有效。**系统知道的事实没有传给模型，
+# 模型就只能说不知道。**
+_VERSION_NOTE_REPLACED = (
+    "\n【版本效力】本文件已被《{replaced_by}》替代，以下条款可能已失效，"
+    "不得作为当前标准。"
+)
+_VERSION_NOTE_REPLACED_UNKNOWN = (
+    "\n【版本效力】本文件已被更新版本替代（未记录替代文件），以下条款可能已失效，"
+    "不得作为当前标准。"
+)
+_VERSION_NOTE_EXPIRED = "\n【版本效力】本文件已失效，以下条款不得作为当前标准。"
+
+
+def _version_note(candidate: Candidate) -> str:
+    """把文件的有效状态翻成一句给模型看的话。空字符串 = 现行有效或不影响作答的状态。
+
+    只对 **superseded / expired** 加注：`unknown` 保持沉默——"上传时没标"不等于
+    "已作废"，给它加一句反而会让模型对正常文件过度保守（这也是前端版本列
+    用中性灰而不是红色的同一条理由）。
+    """
+    status = candidate.effective_status
+    if status == EFFECTIVE_SUPERSEDED:
+        if candidate.replaced_by:
+            return _VERSION_NOTE_REPLACED.format(replaced_by=candidate.replaced_by)
+        return _VERSION_NOTE_REPLACED_UNKNOWN
+    if status == EFFECTIVE_EXPIRED:
+        return _VERSION_NOTE_EXPIRED
+    return ""
 
 
 def _location(candidate: Candidate) -> str:
@@ -158,6 +196,7 @@ def build_evidence(candidates: list[Candidate]) -> str:
             index=c.index,
             title=c.document_title or "未命名文件",
             location=_location(c),
+            version_note=_version_note(c),
             content=c.content.strip(),
         )
         for c in candidates
@@ -228,6 +267,11 @@ def check_citations(answer: LlmAnswer, candidates: list[Candidate]) -> tuple[lis
             "snippet": candidate.content[:400],
             "score": candidate.score,
             "coverage": candidate.coverage,
+            # 版本效力跟着引用走：前端据此给"已被替代"的引用打标签。
+            # 只放在检索结果里不够——用户核对的是具体某一条引用，
+            # 他需要知道"我正看的这段是不是已被作废"。
+            "effective_status": candidate.effective_status,
+            "replaced_by": candidate.replaced_by,
         }
         if candidate.injection_hits:
             # 标记要跟着引用走。只在顶层给一个 injection_suspected 列表不够：

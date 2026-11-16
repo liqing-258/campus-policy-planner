@@ -175,3 +175,76 @@ def test_ask_surfaces_both_versions(app, client, student_headers, llm_on, mock_l
     assert {d["document_id"] for d in conflicts[0]["documents"]} == {old, new}
     # 引用编号也要标出来，前端才能把"答案引用了哪一版"高亮
     assert conflicts[0]["cited_indexes"]
+
+
+# ============================================================ R19：版本效力进证据块
+def test_status_map_flags_superseded_and_names_replacer(app):
+    """检索层要拿到的两个事实：这份文件已被替代，以及替代它的是谁。
+
+    为什么单独测：P1-01 的根因就是"库里知道、检索层不知道"。
+    `status_map` 是那条链路唯一的入口，它错了后面全错。
+    """
+    old = _doc(app, "2025 年本科生奖学金评审办法", academic_year="2025-2026",
+               effective_status="superseded")
+    new = _doc(app, "2026 年本科生奖学金评审办法", academic_year="2026-2027",
+               effective_status="active")
+
+    with app.app_context():
+        doc = db.session.get(Document, new)
+        doc.supersedes_id = old
+        db.session.commit()
+        mapping = versions.status_map([old, new])
+
+    assert mapping[old]["effective_status"] == "superseded"
+    assert mapping[old]["replaced_by"] == "2026 年本科生奖学金评审办法"
+    assert mapping[new]["effective_status"] == "active"
+    assert mapping[new]["replaced_by"] is None
+
+
+def test_status_map_does_not_invent_replacer_when_chain_is_broken(app):
+    """链断了就说没有，不能编一个标题出来——「已被替代但不知被谁替代」也是有效信息。"""
+    old = _doc(app, "2020 年本科生奖学金评审办法", effective_status="superseded")
+    with app.app_context():
+        mapping = versions.status_map([old])
+    assert mapping[old]["effective_status"] == "superseded"
+    assert mapping[old]["replaced_by"] is None
+
+
+def test_status_map_treats_missing_document_as_unknown(app):
+    """片段还在索引里、文件已被物理删除：状态未知，不能假装现行有效。"""
+    with app.app_context():
+        mapping = versions.status_map(["01NOTEXISTDOC000000000000"])
+    assert mapping["01NOTEXISTDOC000000000000"]["effective_status"] is None
+
+
+def test_build_evidence_annotates_superseded_and_stays_silent_for_active():
+    """证据块里必须写出「已被替代」，否则模型只能说"无法判断"（P1-01 的现场）。"""
+    from app.qa import build_evidence
+    from app.retrieval import Candidate
+
+    def _cand(index, title, status, replaced_by=None):
+        return Candidate(
+            index=index, chunk_id=f"c{index}", document_id=f"d{index}",
+            document_title=title, content="第四条 绩点不低于 3.0。",
+            page_number=2, section_title="第二章 申请条件",
+            score=1.0, coverage=0.8,
+            effective_status=status, replaced_by=replaced_by,
+        )
+
+    text = build_evidence([
+        _cand(1, "本科生奖学金评审办法（2026年版）", "active"),
+        _cand(2, "本科生奖学金评审办法（2025年版）", "superseded",
+              "本科生奖学金评审办法（2026年版）"),
+    ])
+
+    assert "【版本效力】" in text
+    assert "已被《本科生奖学金评审办法（2026年版）》替代" in text
+    # 现行有效那份不能带任何效力警告——否则模型会对正常文件也过度保守
+    first_block = text.split("[2]")[0]
+    assert "【版本效力】" not in first_block
+
+
+def test_superseded_weight_is_half():
+    """设计 §5 写的是降权 50%，常量与设计必须一致（改设计要改这里，反之亦然）。"""
+    from app.retrieval import SUPERSEDED_WEIGHT
+    assert SUPERSEDED_WEIGHT == 0.5
