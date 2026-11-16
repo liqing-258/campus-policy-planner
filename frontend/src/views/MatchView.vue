@@ -21,14 +21,15 @@ import {
   type MatchItem,
   type MatchStatus,
   type Paged,
-  type RuleRow,
 } from '../api/client'
 import {
   MATCH_LABEL,
   MATCH_TONE,
+  RULE_STATE,
   RULE_TYPE_LABEL,
   UNKNOWN_REASON_LABEL,
   evidenceLabel,
+  formatDate,
 } from '../utils/format'
 import CorrectionModal from '../components/CorrectionModal.vue'
 import { toConfirmPayload } from '../utils/plan'
@@ -36,14 +37,17 @@ import { GRADE_MAX_BY_TYPE, GRADE_MIN, useMatchStore } from '../stores/match'
 
 const documents = ref<DocumentRow[]>([])
 /** 每份文件"已复核的条件类规则"条数——匹配能不能跑，取决于这个数不是 0。 */
-const conditionsByDoc = ref<Record<string, number>>({})
 /**
  * 每份文件里出现过的奖项（target_group）。M6 补的缺口：
  * 同一份《奖学金评审办法》常同时写着励志奖学金（绩点 ≥ 3.0）与优秀学生奖学金（≥ 3.5），
  * 不选奖项时，绩点 3.2 的励志申请人会被优秀那条判成"不符合"——判错了人。
  * 这份清单来自已经在拉取的规则列表，不额外发请求。
  */
-const groupsByDoc = ref<Record<string, string[]>>({})
+const groupsByDoc = computed<Record<string, string[]>>(() => {
+  const out: Record<string, string[]> = {}
+  for (const d of documents.value) out[d.id] = d.rule_summary?.target_groups ?? []
+  return out
+})
 // R16 纠错反馈：匹配结果页上的上报入口（不改结论，只记反馈）
 const correctionOpen = ref(false)
 const matching = ref(false)
@@ -227,40 +231,18 @@ async function loadDocuments() {
     const data = await api.get<Paged<DocumentRow>>(
       '/documents?page=1&page_size=50&parse_status=indexed',
     )
-    // 只列出"已索引"的文件还不够：没有已复核条件规则的文件点进来只会拿到 2008。
-    // 这里顺带查一次每份文件的已复核条件数，把能用的排在前面并默认选中。
-    const counts: Record<string, number> = {}
-    const groups: Record<string, string[]> = {}
-    await Promise.all(
-      data.items.map(async (doc) => {
-        try {
-          const rules = await api.get<Paged<RuleRow>>(
-            `/documents/${doc.id}/rules?review_status=approved&page=1&page_size=100`,
-          )
-          const conditions = rules.items.filter(
-            (r) => r.rule_type === 'eligibility' || r.rule_type === 'restriction',
-          )
-          counts[doc.id] = conditions.length
-          groups[doc.id] = Array.from(
-            new Set(
-              conditions
-                .map((r) => (r.target_group ?? '').trim())
-                .filter((g): g is string => g.length > 0),
-            ),
-          ).sort()
-        } catch {
-          counts[doc.id] = 0
-          groups[doc.id] = []
-        }
-      }),
-    )
-    conditionsByDoc.value = counts
-    groupsByDoc.value = groups
-    documents.value = [...data.items].sort(
-      (a, b) => (counts[b.id] ?? 0) - (counts[a.id] ?? 0),
-    )
+    // R20：每份文件的准备度随列表一起回来（`rule_summary`），不再逐个文件查规则。
+    // 之前那样做有两个代价：18 份文件 = 18 次往返；而且只拿到"0 条"这个数字，
+    // 分不清"没抽过 / 抽失败 / 抽了没复核 / 本来就不适用"。
+    documents.value = [...data.items].sort((a, b) => {
+      // 能直接匹配的排最前，其余按已复核条件数、再按片段数
+      const rank = (d: DocumentRow) => (d.rule_summary?.state === 'ready' ? 2 : 1)
+      const diff = rank(b) - rank(a)
+      if (diff) return diff
+      return (b.rule_summary?.approved_conditions ?? 0) - (a.rule_summary?.approved_conditions ?? 0)
+    })
     if (!match.documentId) {
-      const best = documents.value.find((d) => (counts[d.id] ?? 0) > 0)
+      const best = documents.value.find((d) => d.rule_summary?.state === 'ready')
       match.documentId = (best ?? documents.value[0])?.id ?? ''
       match.persist()
     }
@@ -524,6 +506,10 @@ const grouped = computed(() => {
 })
 
 const currentDoc = computed(() => documents.value.find((d) => d.id === match.documentId))
+/** 当前文件的准备度；空对象表示文档还没加载完。 */
+const currentSummary = computed(() => currentDoc.value?.rule_summary ?? null)
+/** 只有「已具备匹配条件」才让按钮可点；其余状态展示的是原因，不是报错。 */
+const canMatch = computed(() => currentSummary.value?.state === 'ready')
 
 /* R15：选中的文件若存在多个版本，开跑前提醒核对（结果里也会带 version_note）。
    提醒不替用户选版本——哪版有效只有管理员的标注说了算。 */
@@ -621,7 +607,9 @@ watch(
           <select v-model="match.documentId" class="select">
             <option value="" disabled>选择一份已索引的文件</option>
             <option v-for="d in documents" :key="d.id" :value="d.id">
-              {{ d.title }}（已复核条件 {{ conditionsByDoc[d.id] ?? 0 }} 条 · {{ d.chunk_count }} 片段）
+              {{ d.title }}（{{ RULE_STATE[d.rule_summary?.state ?? 'pending_extract']?.label
+              }}<template v-if="(d.rule_summary?.approved_conditions ?? 0) > 0"> · 已复核条件 {{ d.rule_summary?.approved_conditions }} 条</template>
+              · {{ d.chunk_count }} 片段）
             </option>
           </select>
         </label>
@@ -638,15 +626,40 @@ watch(
         绩点 3.2 在「励志奖学金」下符合、在「优秀学生奖学金」下不符合，混着比会判错人。
         选中奖项后，只比对明确标注该奖项的条件，以及未标注奖项的通用条件。
       </p>
-      <p v-if="currentDoc" class="muted tiny">
-        <template v-if="(conditionsByDoc[currentDoc.id] ?? 0) > 0">
-          该文件有 {{ conditionsByDoc[currentDoc.id] }} 条已复核条件，可以匹配。
-        </template>
-        <template v-else>
-          该文件还没有已复核的条件类规则，现在匹配会返回「暂时无法匹配」。
-          请管理员到「规则管理」抽取并复核，或换一份文件。
-        </template>
-      </p>
+      <!-- R20：选中文件后先给结论，再让用户填表。
+           之前这里的判断只有"有 0 条已复核条件"一种说法，而 0 条背后有五种处境；
+           现在按状态说清是哪一种，以及下一步该谁做什么。 -->
+      <div v-if="currentDoc && currentSummary" class="rule-state" :class="`tone-${RULE_STATE[currentSummary.state]?.tone ?? 'plain'}`">
+        <div class="rule-state-head">
+          <span :class="['tag', RULE_STATE[currentSummary.state]?.tone ?? 'plain']">
+            {{ RULE_STATE[currentSummary.state]?.label ?? currentSummary.state }}
+          </span>
+          <span class="muted tiny">
+            已复核条件 {{ currentSummary.approved_conditions }} 条
+            <template v-if="currentSummary.total_rules"> · 共 {{ currentSummary.total_rules }} 条规则</template>
+            <template v-if="currentSummary.pending_review"> · 待复核 {{ currentSummary.pending_review }} 条</template>
+          </span>
+        </div>
+        <p class="rule-state-hint">{{ RULE_STATE[currentSummary.state]?.hint }}</p>
+        <p v-if="currentSummary.state === 'not_applicable' && currentSummary.applicability_note" class="muted tiny">
+          判定理由：{{ currentSummary.applicability_note }}
+        </p>
+        <p v-if="currentSummary.state === 'extract_failed' && currentSummary.last_attempt_message" class="err-line tiny">
+          {{ currentSummary.last_attempt_message }}
+        </p>
+        <p v-if="currentSummary.state === 'no_conditions'" class="muted tiny">
+          抽取已完成但没抽到可判定的条件（上次 {{ currentSummary.last_attempt_at ? formatDate(currentSummary.last_attempt_at) : '—' }}）。
+          这不等于"没有条件"——也可能是模型拿不准没抽，需管理员确认。
+        </p>
+        <!-- 数据与标签冲突时要明说：匹配是真的会跑，不能按"不适用"糊过去 -->
+        <p v-if="currentSummary.conflict" class="err-line tiny">
+          该文件已标记「不适用于资格匹配」，但仍有 {{ currentSummary.approved_conditions }} 条已复核资格条件，
+          两者矛盾——请管理员在「规则管理」里修正标记。
+        </p>
+        <p v-if="!canMatch" class="muted tiny">
+          仍可填写画像并点「开始匹配」，系统会返回这份文件当前的准备情况（而不是空白结果）。
+        </p>
+      </div>
 
       <h3 class="sub">我的画像</h3>
       <p class="muted tiny">全部选填。留空的字段会变成「缺少信息」而不是「不符合」——两者含义完全不同。</p>
@@ -1024,6 +1037,41 @@ watch(
   color: var(--c-not-met);
   font-size: 12.5px;
   line-height: 1.7;
+}
+
+/* R20：文件准备度提示块。左边框取状态的色调，但**状态同时有文字标签**，
+   颜色只是第二层线索——只靠颜色区分状态，对色觉障碍用户等于没有提示。 */
+.rule-state {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--c-border);
+  border-left: 3px solid var(--c-border);
+  border-radius: var(--radius-control);
+  background: var(--c-surface-2);
+}
+.rule-state.tone-met {
+  border-left-color: var(--c-met);
+}
+.rule-state.tone-unknown {
+  border-left-color: var(--c-unknown);
+}
+.rule-state.tone-not_met {
+  border-left-color: var(--c-not-met);
+}
+.rule-state-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.rule-state-hint {
+  margin: var(--space-2) 0 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--c-text-2);
+}
+.rule-state p:last-child {
+  margin-bottom: 0;
 }
 
 .actions {

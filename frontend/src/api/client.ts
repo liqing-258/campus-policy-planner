@@ -281,6 +281,40 @@ export interface Paged<T> {
 
 export type ParseStatus = 'pending' | 'parsing' | 'parsed' | 'chunked' | 'indexed' | 'empty' | 'failed'
 
+/** 资格匹配准备度五态（R20）。详见后端 app/rule_states.py 的推导顺序。 */
+export type RuleState =
+  | 'ready'
+  | 'pending_review'
+  | 'pending_extract'
+  | 'extract_failed'
+  | 'not_applicable'
+  | 'no_conditions'
+
+/**
+ * 一份政策的规则汇总。随文档列表一起下发，前端不再逐个文件查一次规则
+ * （那是 18 次往返的 N+1）。
+ *
+ * 注意 `conflict`：管理员标了「不适用」、但后来又有已复核资格条件时它是 true。
+ * 这种文件**匹配是能跑的**，所以不能只按"不适用"展示——要让管理员看见矛盾。
+ */
+export interface RuleSummary {
+  state: RuleState
+  applicability: 'unclassified' | 'applicable' | 'not_applicable'
+  applicability_note: string | null
+  total_rules: number
+  condition_rules: number
+  approved_rules: number
+  approved_conditions: number
+  pending_review: number
+  /** 可供选择的申请奖项（来自已复核资格条件的 target_group） */
+  target_groups: string[]
+  last_attempt_at: string | null
+  last_attempt_status: 'succeeded' | 'failed' | null
+  last_attempt_message: string | null
+  last_attempt_rules: number | null
+  conflict: boolean
+}
+
 export interface DocumentRow {
   id: string
   title: string
@@ -301,6 +335,8 @@ export interface DocumentRow {
   updated_at: string | null
   parse_error: string | null
   parse_hint: string | null
+  /** R20：规则准备度。上传接口也会带（通常全是 0 / pending_extract） */
+  rule_summary?: RuleSummary | null
 }
 
 export interface ChunkRow {

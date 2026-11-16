@@ -19,6 +19,7 @@ import {
 import { useAuthStore } from '../stores/auth'
 import {
   REVIEW_LABEL,
+  RULE_STATE,
   RULE_TYPE_LABEL,
   evidenceLabel,
   formatTime,
@@ -89,10 +90,15 @@ async function extract() {
     )
     extractResult.value = result
     await loadRules()
+    // 抽取会改变这份文件的准备度（待提取 → 待审核 / 未发现资格条件），
+    // 不重拉文档列表的话，界面上那行状态会停在旧值上。
+    await loadDocuments()
   } catch (err) {
     error.value = err instanceof ApiError
       ? `${err.code} · ${err.message}`
       : (err instanceof Error ? err.message : '抽取失败')
+    // 失败也要刷新：后端记下了"上次失败"，状态条要能显示出来
+    await loadDocuments()
   } finally {
     window.clearInterval(timer)
     extracting.value = false
@@ -105,6 +111,8 @@ async function review(rule: RuleRow, status: 'approved' | 'rejected') {
   try {
     await api.patch<RuleRow>(`/rules/${rule.id}`, { review_status: status })
     await loadRules()
+    // 复核通过第一条资格条件，这份文件就从「待审核」变成「已具备匹配条件」
+    await loadDocuments()
   } catch (err) {
     error.value = err instanceof ApiError
       ? `${err.code} · ${err.message}`
@@ -121,6 +129,43 @@ const counts = computed(() => {
 })
 
 const currentDoc = computed(() => documents.value.find((d) => d.id === documentId.value))
+/** R20：当前文件的准备度（随文档列表一起回来，不额外请求）。 */
+const currentSummary = computed(() => currentDoc.value?.rule_summary ?? null)
+
+/* 「标记为不适用于资格匹配」——理由必填，后端也会校验。
+   做成行内表单而不是 window.prompt：prompt 在无头验收里不可控，
+   而且它不显示上下文（看不清这份文件的规则情况就要下结论）。 */
+const applicabilityOpen = ref(false)
+const applicabilityNote = ref('')
+const applicabilityBusy = ref(false)
+
+async function markApplicability(target: 'applicable' | 'not_applicable') {
+  if (!documentId.value) return
+  applicabilityBusy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const res = await api.patch<{ hint: string | null }>(
+      `/documents/${documentId.value}/rule-applicability`,
+      { applicability: target, note: applicabilityNote.value.trim() || null },
+    )
+    notice.value = res.hint
+      ?? (target === 'not_applicable'
+        ? '已标记为「不适用于资格匹配」'
+        : '已标记为适用于资格匹配')
+    applicabilityOpen.value = false
+    applicabilityNote.value = ''
+    // 标记会影响文档列表里的 rule_summary，必须重拉，否则界面还显示旧状态
+    await loadDocuments()
+    await loadRules()
+  } catch (err) {
+    error.value = err instanceof ApiError
+      ? `${err.code} · ${err.message}`
+      : (err instanceof Error ? err.message : '标记失败')
+  } finally {
+    applicabilityBusy.value = false
+  }
+}
 
 onMounted(loadDocuments)
 </script>
@@ -171,6 +216,84 @@ onMounted(loadDocuments)
         </template>
       </p>
 
+      <!-- R20：这份文件到底能不能参与资格匹配，一处说清。
+           之前只有"抽取"和"复核"两个动作，没有"这份文件本来就不该参与匹配"的表达方式，
+           于是食堂指南也会被塞进匹配下拉，学生选了就是一句 2008。 -->
+      <div v-if="currentSummary" class="doc-state" :class="`tone-${RULE_STATE[currentSummary.state]?.tone ?? 'plain'}`">
+        <div class="doc-state-head">
+          <span :class="['tag', RULE_STATE[currentSummary.state]?.tone ?? 'plain']">
+            {{ RULE_STATE[currentSummary.state]?.label ?? currentSummary.state }}
+          </span>
+          <span class="muted tiny">
+            规则 {{ currentSummary.total_rules }} 条 · 资格条件 {{ currentSummary.condition_rules }} 条 ·
+            已复核条件 {{ currentSummary.approved_conditions }} 条 · 待复核 {{ currentSummary.pending_review }} 条
+          </span>
+        </div>
+        <p class="doc-state-hint">{{ RULE_STATE[currentSummary.state]?.hint }}</p>
+        <p v-if="currentSummary.last_attempt_at" class="muted tiny">
+          上次抽取：{{ formatTime(currentSummary.last_attempt_at) }} ·
+          {{ currentSummary.last_attempt_status === 'succeeded' ? '成功' : '失败' }}
+          <template v-if="currentSummary.last_attempt_status === 'failed'">
+            —— {{ currentSummary.last_attempt_message }}
+          </template>
+          <template v-else-if="currentSummary.last_attempt_rules === 0">
+            —— 没有抽到可用规则
+          </template>
+        </p>
+        <p v-if="currentSummary.applicability === 'not_applicable' && currentSummary.applicability_note" class="muted tiny">
+          不适用理由：{{ currentSummary.applicability_note }}
+        </p>
+        <p v-if="currentSummary.conflict" class="err-line tiny">
+          已标记「不适用」，但仍有 {{ currentSummary.approved_conditions }} 条已复核资格条件——请修正标记，
+          否则学生在匹配页会看到一个自相矛盾的状态。
+        </p>
+
+        <div v-if="auth.isAdmin" class="doc-state-actions">
+          <template v-if="currentSummary.applicability === 'not_applicable'">
+            <button class="btn btn-sm btn-ghost" :disabled="applicabilityBusy" @click="markApplicability('applicable')">
+              改判为适用于资格匹配
+            </button>
+          </template>
+          <template v-else>
+            <button
+              class="btn btn-sm btn-ghost"
+              :disabled="applicabilityBusy || currentSummary.approved_conditions > 0"
+              :title="currentSummary.approved_conditions > 0 ? '已有已复核资格条件，需先驳回这些规则' : ''"
+              @click="applicabilityOpen = !applicabilityOpen"
+            >
+              标记为不适用于资格匹配
+            </button>
+            <span v-if="currentSummary.approved_conditions > 0" class="muted tiny">
+              已有已复核资格条件，需先在下方驳回，才能标记为不适用。
+            </span>
+          </template>
+        </div>
+
+        <div v-if="applicabilityOpen" class="applicability-form">
+          <label class="field">
+            <span>判定理由（必填）</span>
+            <textarea
+              v-model="applicabilityNote"
+              class="textarea"
+              rows="2"
+              maxlength="500"
+              placeholder="例如：全文为处分种类、程序与申诉，不含申请资格条件"
+            />
+          </label>
+          <div class="applicability-actions">
+            <button
+              class="btn btn-sm"
+              :disabled="applicabilityBusy || !applicabilityNote.trim()"
+              @click="markApplicability('not_applicable')"
+            >
+              {{ applicabilityBusy ? '提交中…' : '确认标记' }}
+            </button>
+            <button class="btn btn-sm btn-ghost" @click="applicabilityOpen = false">取消</button>
+            <span class="muted tiny">理由会展示给学生和下一个管理员。</span>
+          </div>
+        </div>
+      </div>
+
       <div v-if="auth.isAdmin" class="actions">
         <button class="btn" :disabled="extracting || !documentId" @click="extract">
           {{ extracting ? `抽取中… ${(elapsed / 1000).toFixed(1)}s` : '运行规则抽取' }}
@@ -182,6 +305,9 @@ onMounted(loadDocuments)
     </section>
 
     <p v-if="error" class="err-line">{{ error }}</p>
+    <!-- notice 之前只写不显示：标记"不适用"这类操作的结果必须有回执，
+         否则管理员不知道到底生效了没有 -->
+    <p v-if="notice" class="ok-line">{{ notice }}</p>
 
     <section v-if="extractResult" class="card ok-card">
       <h3>抽取完成</h3>
@@ -428,5 +554,55 @@ onMounted(loadDocuments)
   color: var(--c-not-met);
   font-size: 13px;
   margin: 0;
+}
+
+/* R20：文件准备度条 + 不适用标记表单 */
+.doc-state {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--c-border);
+  border-left: 3px solid var(--c-border);
+  border-radius: var(--radius-control);
+  background: var(--c-surface-2);
+}
+.doc-state.tone-met {
+  border-left-color: var(--c-met);
+}
+.doc-state.tone-unknown {
+  border-left-color: var(--c-unknown);
+}
+.doc-state.tone-not_met {
+  border-left-color: var(--c-not-met);
+}
+.doc-state-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.doc-state-hint {
+  margin: var(--space-2) 0 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--c-text-2);
+}
+.doc-state-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  flex-wrap: wrap;
+}
+.applicability-form {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--c-border);
+}
+.applicability-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  flex-wrap: wrap;
 }
 </style>

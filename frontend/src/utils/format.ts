@@ -54,6 +54,45 @@ export const REVIEW_LABEL: Record<string, string> = {
   rejected: '已拒绝',
 }
 
+/**
+ * 资格匹配准备度五态（R20）。
+ *
+ * `tone` 决定标签配色，`hint` 是给用户的一句话解释——**状态不能只靠颜色区分**，
+ * 所以每个状态都带文字标签，颜色只是第二层线索。
+ */
+export const RULE_STATE: Record<string, { label: string; tone: string; hint: string }> = {
+  ready: {
+    label: '已具备匹配条件',
+    tone: 'met',
+    hint: '可以直接填写画像做资格匹配',
+  },
+  pending_review: {
+    label: '待审核',
+    tone: 'unknown',
+    hint: '规则已抽取，但还没有已复核的资格条件，暂不能匹配',
+  },
+  pending_extract: {
+    label: '待提取',
+    tone: 'plain',
+    hint: '尚未从这份政策里抽取条件，暂不能匹配',
+  },
+  extract_failed: {
+    label: '提取失败',
+    tone: 'not_met',
+    hint: '上次抽取失败，需要管理员重试',
+  },
+  no_conditions: {
+    label: '未发现资格条件',
+    tone: 'unknown',
+    hint: '已尝试抽取但没抽到可判定的条件——可能不涉及申请资格，需管理员确认',
+  },
+  not_applicable: {
+    label: '不适用于资格匹配',
+    tone: 'plain',
+    hint: '这份政策不涉及申请资格，可查看事务指南了解办理方式',
+  },
+}
+
 export const TASK_STATUS_LABEL: Record<string, string> = {
   todo: '待办',
   doing: '进行中',
