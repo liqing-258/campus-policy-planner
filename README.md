@@ -541,6 +541,7 @@ curl -X POST http://127.0.0.1:5000/api/v1/qa/ask ^
 ```bash
 .venv\Scripts\python.exe -m pytest --basetemp=.build/pt_run   # 全量 456 项全绿（本机约 480 秒）
 .venv\Scripts\python.exe tools\dump_routes.py --expect 57   # 真实接口数（R20 起 57 条）
+.venv\Scripts\python.exe tools\doc_integrity.py           # 文档完整性：检查 .md 是否被批量脚本写坏
 .venv\Scripts\python.exe tools\run_eval.py        # 24 条评测集，门禁 2 项（约 50 秒，会真实调模型）
 .venv\Scripts\python.exe tools\followup_probe.py --clean  # 18 份 × 追问建议可答性（约 3 分钟，真实调模型）
 .venv\Scripts\python.exe tools\e2e_gate.py        # M3 端到端 10 项（M3 交付，仍应全过）
