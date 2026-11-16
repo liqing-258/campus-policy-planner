@@ -33,26 +33,39 @@ const router = useRouter()
 const route = useRoute()
 
 /**
- * `autoOpen` 让 `/login` 这条老路由直接拉开小窗。
- * 用 prop 而不是读 `route.name === 'login'`：LoginView 就是包着 prop 的一层壳，
- * 谁要复用落地页都只需要传一个布尔值，不用记路由名。
+ * `autoOpen` 是给"任何挂载方强制开窗"留的口子（比如以后要从别处直跳登录）。
+ * R23 起 `/login` 不再传它：默认状态是**关着的落地页**，靠 `?open=1` 开窗。
+ * 用 prop 而不是读 `route.name === 'login'`：谁要复用落地页都只需要传一个布尔值。
  */
 const props = withDefaults(defineProps<{ autoOpen?: boolean }>(), { autoOpen: false })
 
 const panelOpen = ref(false)
 const health = ref<Health | null>(null)
 
-/** 已登录的话不该看到落地页：直接按 redirect 参数走人 */
+/**
+ * R23：**落地页恒显，"进系统"是第二个动作**。
+ *
+ * 旧版这里是 `if (await auth.restore()) router.replace(redirectTarget)` ——
+ * 只要本地还留着令牌，落地页立刻把自己弹走，于是"登录网址"永远看不到这一屏，
+ * 双击网址直接落在工作台。用户要的顺序是：先看见首屏（系统名 + 一句话 + 开启系统），
+ * 再决定进不进。
+ *
+ * 现在 `restore()` 只回答"我是谁"，**不决定去留**；去留给「开启系统」：
+ * 已登录直接进系统，未登录拉开登录小窗。这样"看首屏"与"进系统"是两个动作，
+ * 也顺带给了换账号一个明确入口（已登录时按钮下那行小字）。
+ */
+const authed = ref(false)
+
+/** 未登录访问深链时的回跳目标：`?redirect=/match` 这类 */
 const redirectTarget = computed(() =>
   typeof route.query.redirect === 'string' ? route.query.redirect : '/',
 )
 
 onMounted(async () => {
-  if (await auth.restore()) {
-    router.replace(redirectTarget.value)
-    return
-  }
-  if (props.autoOpen) panelOpen.value = true
+  authed.value = await auth.restore()
+  // `?open=1` 让验收脚本与"去登录"深链可以直接拉开登录小窗——
+  // 默认状态是关着的（见上），否则自动化拿不到输入框。
+  if (props.autoOpen || route.query.open === '1') panelOpen.value = true
   try {
     health.value = await api.get<Health>('/health')
   } catch {
@@ -69,7 +82,17 @@ function onKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && panelOpen.value) panelOpen.value = false
 }
 
+/**
+ * 「开启系统」：已登录直接进系统，未登录拉开登录小窗。
+ *
+ * 已登录时**不再弹登录框**——令牌还有效就没有理由让人再输一遍口令；
+ * 要换账号走按钮下面那行小字，它专门开面板。
+ */
 function open() {
+  if (authed.value) {
+    router.replace(redirectTarget.value)
+    return
+  }
   panelOpen.value = true
 }
 
@@ -110,6 +133,12 @@ function onMaskClick(event: MouseEvent) {
         <span>开启系统</span>
         <i aria-hidden="true">→</i>
       </button>
+
+      <!-- 已登录时的换账号入口：不占视觉重量，但不能没有——
+           否则本地令牌还在的人永远看不到登录窗 -->
+      <p v-if="authed" class="signed">
+        已登录 · <button class="link tiny" type="button" @click="panelOpen = true">换个账号登录</button>
+      </p>
 
       <p v-if="health" class="scale">
         知识库已收录 <b>{{ health.document_count }}</b> 份政策 ·
@@ -299,6 +328,13 @@ function onMaskClick(event: MouseEvent) {
 .scale b {
   color: var(--c-accent);
   font-variant-numeric: tabular-nums;
+}
+
+/* 已登录时的换账号小字：贴在按钮下方，用 text-2 而不是 dim（这行坐在渐变底上） */
+.signed {
+  margin: var(--space-2) 0 0;
+  font-size: 11.5px;
+  color: var(--c-text-2);
 }
 
 .foot {

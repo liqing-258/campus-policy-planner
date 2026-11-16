@@ -20,18 +20,19 @@ const router = createRouter({
     // meta.title 由 App.vue 顶栏读取，页面里不再各写一份标题
     { path: '/welcome', name: 'welcome', component: WelcomeView, meta: { public: true, title: '知校' } },
     /**
-     * `/login` 继续保留，直接渲染同一个落地页并**自动开窗**。
+     * `/login` 继续保留，与 `/welcome` 同一个落地页。
      *
-     * 不能删：旧书签、答辩脚本、CDP 验收都写着 `/login`；删掉之后它们会掉进
-     * 未匹配路由，被守卫弹回落地页，看起来像"登录入口没了"。
-     * `?open=1` 之外也认 `redirect`，这样未登录访问深链时落地页知道登完去哪。
+     * 不能删：旧书签、`start-backend.bat`、答辩脚本、CDP 验收都写着 `/login`；
+     * 删掉之后它们会掉进未匹配路由，被守卫弹回落地页，看起来像"登录入口没了"。
+     *
+     * **R23 起默认不再自动开窗**（用户要先看见首屏）：`?open=1` 才直接拉开登录小窗，
+     * `?redirect=` 让落地页知道登完去哪——两个参数都在 WelcomeView 里读。
      */
     {
       path: '/login',
       name: 'login',
       component: LoginView,
       meta: { public: true, title: '登录' },
-      props: { autoOpen: true },
     },
     { path: '/', name: 'dashboard', component: DashboardView, meta: { title: '工作台' } },
     { path: '/library', name: 'library', component: LibraryView, meta: { title: '政策知识库' } },
