@@ -79,15 +79,27 @@ def main() -> int:
     for word in BANNED:
         if word in login_text:
             failures.append(f"登录页出现建设期字样「{word}」")
-    if "演示账号" in login_text or "student" not in login_text:
-        notes.append("登录页角色卡片文案：" + login_text.replace("\n", " / ")[:120])
-    roles = c.eval("document.querySelectorAll('.role-chip').length")
-    if roles != 2:
-        failures.append(f"登录页角色卡片应为 2 个，实际 {roles}")
-    bg = c.eval("getComputedStyle(document.querySelector('.login-page')).backgroundColor")
+    # 登录页在 R11 之后改成了欢迎页 + 弹出的登录面板：根节点是 `.welcome`，
+    # 原来的 `.login-page` 和"两个角色卡片（.role-chip）"都不存在了。
+    # 脚本没跟着改，结果是每次都 `getComputedStyle(null)` 直接抛异常退出——
+    # 看起来像"页面崩了"，其实是巡检脚本自己过期。判据改成：
+    # 欢迎页在 + 用户名/密码两个输入框在（这才是登录页真正必需的东西）。
+    fields = c.eval("""(() => ({
+      user: !!document.querySelector('input[autocomplete="username"]'),
+      pass: !!document.querySelector('input[autocomplete="current-password"]'),
+      root: !!document.querySelector('.welcome'),
+    }))()""")
+    if not fields["root"]:
+        failures.append("登录页根节点 .welcome 不存在")
+    if not (fields["user"] and fields["pass"]):
+        failures.append(f"登录表单缺字段：{fields}")
+    bg = c.eval("""(() => {
+      const el = document.querySelector('.welcome') || document.body;
+      return getComputedStyle(el).backgroundColor;
+    })()""")
     notes.append(f"登录页底色 {bg}")
     c.shot(str(out / "01-login.png"))
-    print(f"[巡检] 登录页 ok · 角色卡片 {roles} · 底色 {bg}")
+    print(f"[巡检] 登录页 ok · 输入框 user/pass={fields['user']}/{fields['pass']} · 底色 {bg}")
 
     # ---------- 以学生身份登录 ----------
     c.eval("""(() => {
@@ -144,7 +156,11 @@ def main() -> int:
         if metrics["overflow"] > 2:
             failures.append(f"{label}：横向溢出 {metrics['overflow']}px")
 
-        # 深色主题自检：正文与卡片底色亮度必须"一深一浅配得上"，不能出现浅底浅字
+        # 配色自检（R10 已换浅底，判据跟着反过来）：
+        # 旧版这里断言"底色必须暗（bodyLum ≤ 0.6）"，那是 R10 之前深色主题的规矩；
+        # 站点换成浅底青碧后这条一定失败——4 个页面全报"与深色主题不符"，
+        # 于是真正的失败被这 4 条噪声盖住。现在改成：底色必须够浅（≥0.75），
+        # 且正文必须明显比卡片深（文字亮度低于卡片 0.35 以上），才是"浅底深字"。
         contrast = c.eval("""(() => {
           const parse = (s) => (s.match(/\\d+/g) || []).slice(0, 3).map(Number);
           const lum = (rgb) => (0.2126*rgb[0] + 0.7152*rgb[1] + 0.0722*rgb[2]) / 255;
@@ -157,10 +173,10 @@ def main() -> int:
             textLum: +lum(parse(cs.color)).toFixed(2),
           };
         })()""")
-        if contrast["bodyLum"] > 0.6:
-            failures.append(f"{label}：页面底色偏亮（{contrast['bodyLum']}），与深色主题不符")
-        if contrast["cardLum"] > 0.6 and contrast["textLum"] > 0.6:
-            failures.append(f"{label}：浅底浅字（card {contrast['cardLum']} / text {contrast['textLum']}）")
+        if contrast["bodyLum"] < 0.75:
+            failures.append(f"{label}：页面底色偏暗（{contrast['bodyLum']}），与浅底主题不符")
+        if contrast["cardLum"] - contrast["textLum"] < 0.35:
+            failures.append(f"{label}：文字与卡片对比不足（card {contrast['cardLum']} / text {contrast['textLum']}）")
 
         c.shot(str(out / f"{idx:02d}-{slug}.png"))
         print(f"[巡检] {label:<6} ok · 文字 {len(body):>5} · 卡片 {metrics['cards']:>2} · "
