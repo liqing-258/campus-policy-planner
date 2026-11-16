@@ -214,6 +214,41 @@ def main() -> int:
     notes.append(f"时段图 柱 {hour['cols']} 网格 {hour['grid']} 最高 {hour['maxH']}px "
                  f"高峰第 {hour['peakIdx']} 根 角标 {hour['peakBadge']} 高 {hour['chartH']}")
 
+    # ---------- 4.5 活跃度：高频日必须被标出来，且只标一天 ----------
+    # 需求写的是"突出显示高频提问日期"。只断言"有条形"是不够的——七根条长得一样也算有条形。
+    week = c.eval("""(() => {
+      const card = [...document.querySelectorAll('.card')].find(el => el.querySelector('.askers'));
+      if (!card) return {err: 'no activity card'};
+      const rows = [...card.querySelectorAll('.bars > li')];
+      const counts = rows.map(el => +el.querySelector('.bar-count').textContent.trim());
+      const peaks = rows.filter(el => el.classList.contains('peak'));
+      const trackH = rows.map(el => +el.querySelector('.bar-track').getBoundingClientRect().height.toFixed(1));
+      return {
+        n: rows.length,
+        counts,
+        peakCount: peaks.length,
+        peakLabel: peaks[0] ? peaks[0].querySelector('.bar-label').textContent.trim() : '',
+        peakValue: peaks[0] ? +peaks[0].querySelector('.bar-count').textContent.trim() : -1,
+        maxCount: Math.max(...counts),
+        maxTrack: Math.max(...trackH), minTrack: Math.min(...trackH),
+        labWeight: peaks[0] ? getComputedStyle(peaks[0].querySelector('.bar-label')).fontWeight : '',
+        rows: rows.length,
+        askers: card.querySelectorAll('.askers li').length,
+      };
+    })()""")
+    if week.get("err"):
+        fails.append(f"活跃度测量失败：{week}")
+    else:
+        check(week["n"] == 7, f"星期分布应为 7 行，实际 {week['n']}")
+        check(week["peakCount"] == 1, f"高频日应恰好标 1 天，实际 {week['peakCount']} 天")
+        check(week["peakValue"] == week["maxCount"],
+              f"标出来的不是最多的一天：标 {week['peakLabel']} {week['peakValue']} / 实际最多 {week['maxCount']}")
+        check(int(week["labWeight"]) >= 600, f"高频日标签没加粗（weight {week['labWeight']}）")
+        check(week["maxTrack"] > week["minTrack"], "高频日的条没比其它天粗")
+        check(week["askers"] >= 1, "提问最多的学生列表为空")
+        notes.append(f"活跃度 7 行 标出 {week['peakLabel']} {week['peakValue']}（最多 {week['maxCount']}）"
+                     f" 条高 {week['minTrack']}/{week['maxTrack']} 学生 {week['askers']} 人")
+
     # ---------- 5. 明细表 ----------
     table = c.eval("""(() => {
       const t = document.querySelector('.dc-table');

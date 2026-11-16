@@ -665,10 +665,19 @@ function hourLabel(hour: number) {
 }
 
 // ---------- 活跃度 ----------
+/**
+ * 星期分布。`peak` 标出提问最多的那一天（需求二.右侧「突出显示高频提问日期」）。
+ *
+ * 只在 `count > 0` 时才标：全为零的一周里"最大值"是并列的，标了会误导读成"周四最活跃"。
+ */
 const weekdayBars = computed(() => {
   const buckets = qa.value?.weekdays ?? []
   const max = Math.max(1, ...buckets.map((b) => b.count))
-  return buckets.map((b) => ({ ...b, percent: Math.round((b.count / max) * 100) }))
+  return buckets.map((b) => ({
+    ...b,
+    percent: Math.round((b.count / max) * 100),
+    peak: b.count > 0 && b.count === max,
+  }))
 })
 
 function bucketLabel(bucket: PortraitBucket) {
@@ -914,7 +923,14 @@ function completenessPct(value: number) {
         </div>
         <div class="sub-title">星期分布</div>
         <ul class="bars">
-          <li v-for="bucket in weekdayBars" :key="bucket.label">
+          <li
+            v-for="bucket in weekdayBars"
+            :key="bucket.label"
+            :class="{ peak: bucket.peak }"
+            @pointerenter="showTip($event, bucket.label, [`${bucket.count} 条提问`, bucket.peak ? '一周里最多的一天' : ''])"
+            @pointermove="moveTip"
+            @pointerleave="hideTip"
+          >
             <span class="bar-label">{{ bucket.label }}</span>
             <span class="bar-track">
               <span class="bar-fill" :style="{ width: `${bucket.percent}%` }" />
@@ -1680,6 +1696,26 @@ function completenessPct(value: number) {
 }
 
 /* ---------- 活跃度 ---------- */
+/**
+ * 高频日强调：**条形加高 2px + 标签与数字加粗主色**。
+ *
+ * 不用整行底色：`.bars` 在别的页面也用于"任务完成度"这类进度，底色会让人读成"选中"。
+ * 也不用图标或"最多"角标——七行里只有一行特殊，加两处强调已经够，第三处就成装饰了。
+ */
+.dc .bars > li.peak .bar-track {
+  height: 8px;
+}
+
+.dc .bars > li.peak .bar-label {
+  color: var(--c-primary);
+  font-weight: 600;
+}
+
+.dc .bars > li.peak .bar-count {
+  color: var(--c-primary);
+  font-weight: 600;
+}
+
 .askers {
   list-style: none;
   margin: 0;
