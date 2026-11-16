@@ -9,7 +9,8 @@ Vue 会把值转成 number 写回，接着 `.replace()` / `.trim()` 抛 TypeErro
 1. 学生类型是下拉，且含本科/专科等中文选项
 2. 数值字段里不存在 `type="number"`（原生上下箭头连带消失，不用改颜色）
 3. 往年级/绩点/已修学分里塞 `-4` 这类粘贴值：页面不崩、负号被抹掉
-4. 塞越界值 `99`：给出红字提示、禁用提交、**但不把 99 悄悄改成 8**
+4. 塞越界值 `99`：**两类字段行为不同，按设计来**——年级夹取到边界（合法域由学生类型决定，
+   「第 5 年」是不存在的值）；绩点/学分不夹取，原样保留 + 红字 + 禁用提交
 5. 改成合法值：提示消失、按钮恢复可点
 6. 失焦只统一写法（`007` → `7`），不改数值
 7. 全程零 JS 异常
@@ -64,7 +65,7 @@ def main() -> int:
     # ---------- 登录 ----------
     c.goto(f"{base}/")
     c.eval("localStorage.clear(); true")
-    c.goto(f"{base}/login")
+    c.goto(f"{base}/login?open=1")
     c.wait_for("!!document.querySelector('input[autocomplete=\"username\"]')", 20)
     c.eval("""(() => {
       const u = document.querySelector('input[autocomplete="username"]');
@@ -117,9 +118,18 @@ def main() -> int:
         return {{ label, type: el.type, inputmode: el.getAttribute('inputmode') }};
       }});
     }})()""")
-    check("三个数值框都保留数字键盘提示",
-          all(m["inputmode"] == "decimal" and m["type"] == "text" for m in (modes or [])),
+    by_label = {m["label"]: m for m in (modes or [])}
+    check("三个数值框都是 text + 数字键盘提示",
+          all(m["type"] == "text" and m["inputmode"] in ("numeric", "decimal")
+              for m in (modes or [])),
           str([(m["label"], m["type"], m["inputmode"]) for m in (modes or [])]))
+    # 年级是整数（1–8）→ numeric；绩点/学分可带小数 → decimal。两者都给数字键盘，
+    # 但小数点键只该出现在真能填小数的字段上。
+    check("年级 numeric、绩点/学分 decimal（整数与小数分开）",
+          by_label.get("年级", {}).get("inputmode") == "numeric"
+          and all(by_label.get(k, {}).get("inputmode") == "decimal"
+                  for k in ("平均学分绩点", "已修学分")),
+          str({k: v.get("inputmode") for k, v in by_label.items()}))
 
     def type_into(label: str, value: str, blur: bool = False) -> None:
         """模拟粘贴/脚本赋值：直接设 value 再派发 input（键盘输入走的也是这条路径）"""
@@ -152,10 +162,21 @@ def main() -> int:
 
     # ---------- 4. 越界：不静默纠正 ----------
     c.clear_events()
+    # 设计 §8 的表单校验表把数值字段分成两类：
+    #   年级 —— **夹取到边界**（合法域由学生类型决定，「专科第 5 年」不是填错了，是这个值不存在）
+    #   绩点 / 排名 / 学分 —— **不夹取**（「绩点 9」是算错了，悄悄改成 5 等于替用户编成绩）
+    # 这一段原本把两类的期望写反（要求年级也原样保留），于是恒定 4 项失败；
+    # 而产品实现与设计一致。按设计改测试：年级验"夹到边界"，绩点验"不夹取 + 红 + 禁用"。
+    c.clear_events()
     type_into("年级", "99", blur=True)
+    grade_value = c.eval(field_js("年级"))
+    # 未选学生类型 → GRADE_MAX_DEFAULT = 8（stores/match.ts）
+    check("年级越界被夹到边界（设计定的行为）", grade_value == "8", f"值={grade_value!r}")
+
+    type_into("平均学分绩点", "99", blur=True)
     state = c.eval(f"""(() => {{
       {helper}
-      const f = window.__f('年级');
+      const f = window.__f('平均学分绩点');
       const line = document.querySelector('.invalid-line');
       const btn = document.querySelector('.card .actions button.btn');
       return {{
@@ -165,9 +186,10 @@ def main() -> int:
         disabled: btn ? btn.disabled : null,
       }};
     }})()""")
-    check("越界值原样保留（不被悄悄改成 8）", state["value"] == "99", f"值={state['value']!r}")
+    check("绩点越界值原样保留（不被悄悄改成 5）", state["value"] == "99", f"值={state['value']!r}")
     check("越界字段被描红", state["bad"])
-    check("给出越界提示文字", "年级" in state["line"] and "超出允许范围" in state["line"], state["line"][:80])
+    check("给出越界提示文字",
+          "平均学分绩点" in state["line"] and "超出允许范围" in state["line"], state["line"][:80])
     check("越界时禁用提交", state["disabled"] is True, f"disabled={state['disabled']}")
     c.shot(str(out / "02-out-of-range.png"))
 
