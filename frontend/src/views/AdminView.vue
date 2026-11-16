@@ -414,8 +414,11 @@ function bucketLabel(bucket: PortraitBucket) {
       <div class="stat accent">
         <span class="k">画像记录</span>
         <span class="v">{{ pSummary?.session_count ?? '—' }}<small>条</small></span>
+        <!-- `document_count` 是「被匹配过的政策数」（distinct document_id），
+             不是知识库文件总数。写成"份政策"会被读成后者（R19 的 P3-01），
+             所以把限定语放在数字同一行里，而不是塞进 tooltip。 -->
         <span class="d">
-          {{ pSummary?.student_count ?? 0 }} 名学生 · {{ pSummary?.document_count ?? 0 }} 份政策
+          {{ pSummary?.student_count ?? 0 }} 名学生 · {{ pSummary?.document_count ?? 0 }} 份政策被匹配
         </span>
       </div>
       <div class="stat ok">

@@ -122,6 +122,19 @@ const progress = computed(() => {
   return Math.round((tasks.value.filter((t) => t.status === 'done').length / total) * 100)
 })
 
+/**
+ * 计划列表卡片的迷你进度。
+ *
+ * 用后端在 `GET /plans` 里一并下发的 `task_counts`，而不是为每张卡片再请求一次
+ * `/tasks?plan_id=`——那是原来切换计划才拉任务的写法，列表要显示进度时就会变成
+ * N+1（R19 的 P3-02）。这里只读已到手的数字，不发请求。
+ */
+function planPct(plan: PlanRow): number {
+  const counts = plan.task_counts
+  if (!counts || !counts.total) return 0
+  return Math.round((counts.done / counts.total) * 100)
+}
+
 onMounted(loadPlans)
 </script>
 
@@ -166,6 +179,11 @@ onMounted(loadPlans)
               </span>
               <span class="muted tiny">{{ formatTime(p.created_at) }}</span>
               <FavoriteButton target-type="plan" :target-id="p.id" />
+            </div>
+            <!-- 进度放在卡片里：不进详情页也能看出哪个计划快办完了（P3-02） -->
+            <div v-if="p.task_counts && p.task_counts.total" class="plan-progress">
+              <span class="mini-track"><i :style="{ width: planPct(p) + '%' }" /></span>
+              <span class="muted tiny">{{ p.task_counts.done }}/{{ p.task_counts.total }} 项</span>
             </div>
           </li>
         </ul>
@@ -325,6 +343,31 @@ onMounted(loadPlans)
   justify-content: space-between;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* 列表卡片的迷你进度：与详情区 .bar 同一套色（边框灰底 + met 绿填充），
+   只是更细更短——列表要的是"扫一眼看出进度"，不是精确读数 */
+.plan-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: 6px;
+}
+
+.mini-track {
+  flex: 1;
+  height: 4px;
+  background: var(--c-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.mini-track i {
+  display: block;
+  height: 100%;
+  background: var(--c-met);
+  border-radius: 999px;
+  transition: width 0.24s ease;
 }
 
 .detail-head {

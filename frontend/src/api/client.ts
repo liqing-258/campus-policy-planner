@@ -609,6 +609,12 @@ export interface PlanRow {
   match_session_id: string | null
   created_at: string | null
   confirmed_at: string | null
+  /**
+   * 任务计数（R19 新增，仅 `GET /plans` 列表接口下发）。
+   * `open` 与工作台 `/tasks/stats` 同口径：排除已完成与已取消。
+   * 有了它，计划卡片不必再为每个计划单独请求一次 `/tasks?plan_id=`（原先的 N+1）。
+   */
+  task_counts?: { total: number; done: number; open: number }
 }
 
 export type TaskStatus = 'todo' | 'doing' | 'done' | 'deferred' | 'cancelled'

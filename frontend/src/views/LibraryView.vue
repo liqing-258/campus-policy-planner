@@ -578,6 +578,7 @@ function search() {
         <thead>
           <tr>
             <th>标题</th>
+            <th>部门</th>
             <th>类型</th>
             <th>大小</th>
             <th>状态</th>
@@ -597,6 +598,7 @@ function search() {
                 <button class="link" @click="toggleChunks(doc)">{{ doc.title }}</button>
                 <div v-if="doc.parse_hint" class="muted tiny">{{ doc.parse_hint }}</div>
               </td>
+              <td class="dept-cell">{{ doc.department || '—' }}</td>
               <td class="mono">{{ doc.file_type }}</td>
               <td class="mono">{{ formatBytes(doc.file_size) }}</td>
               <td>
@@ -606,6 +608,8 @@ function search() {
               </td>
               <td>
                 <div class="version-cell">
+                  <!-- 版本名称（"2026版"这类人工标签）优先显示：它比学年+日期更直接 -->
+                  <span v-if="doc.version_label" class="tag plain">{{ doc.version_label }}</span>
                   <span v-if="doc.academic_year || doc.published_at" class="muted tiny">
                     <template v-if="doc.academic_year">{{ doc.academic_year }}</template>
                     <template v-if="doc.academic_year && doc.published_at"> · </template>
@@ -635,7 +639,7 @@ function search() {
               </td>
             </tr>
             <tr v-if="editingId === doc.id" class="detail-row">
-              <td colspan="8">
+              <td colspan="9">
                 <div class="edit-grid">
                   <label class="field">
                     <span>学年</span>
@@ -670,7 +674,7 @@ function search() {
               </td>
             </tr>
             <tr v-if="openDocId === doc.id" class="detail-row">
-              <td colspan="8">
+              <td colspan="9">
                 <!-- R15 旧版本提示：「已被替代」是管理员确认的事实，
                      「不是最新」只是日期推断，两句话不混用 -->
                 <div
@@ -841,7 +845,7 @@ function search() {
             </tr>
           </template>
           <tr v-if="!docs.length && !loading">
-            <td colspan="8" class="muted empty">暂无文件。管理员可在上方上传。</td>
+            <td colspan="9" class="muted empty">暂无文件。管理员可在上方上传。</td>
           </tr>
         </tbody>
       </table>
