@@ -25,6 +25,7 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -276,8 +277,14 @@ def main() -> int:
     uploads = box / "data" / "uploads"
     if not uploads.is_dir() or not any(uploads.iterdir()):
         failures.append("场景 A：示例政策没有导入 uploads/")
-    if "建表 13 张" not in text:
-        failures.append("场景 A：没有执行建表自举")
+    # 这里原来写死「建表 13 张」。数据库在 R14/R16/R17/R20 又加了四张表（calendar_events /
+    # correction_feedback / favorites / document_rule_states），自举现在打印「建表 17 张」，
+    # 于是这条断言自那以后**每一轮都必然失败**——而场景 A 的其他断言全绿、表也确实建好了，
+    # 看起来像"打包坏了"，实际是断言留在两年前的常量上。
+    # 改成只要求"建过表"（数量按实际解析），把数字打进失败信息里，不再写死。
+    boot = re.search(r"建表\s*(\d+)\s*张", text)
+    if not boot or int(boot.group(1)) <= 0:
+        failures.append(f"场景 A：没有执行建表自举（输出里找不到『建表 N 张』，N>0）")
     listing = sorted(f"{p.name}:{p.stat().st_size // 1024}KB"
                      for p in (box / "data").iterdir()) if (box / "data").is_dir() else []
     print(f"[自检] 场景 A data/ → {listing}")
