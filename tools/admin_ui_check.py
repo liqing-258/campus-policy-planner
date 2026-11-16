@@ -83,7 +83,7 @@ def login_admin(c: Cdp, base: str) -> None:
     """固定开场三步：落同源页 → 清令牌 → 再进登录页（复用 profile 会带旧 JWT）。"""
     c.goto(f"{base}/")
     c.eval("localStorage.clear(); true")
-    c.goto(f"{base}/login")
+    c.goto(f"{base}/login?open=1")
     c.wait_for("""!!document.querySelector('input[autocomplete="username"]')""", 20)
     c.eval("""(() => {
       const set = (el, v) => {
@@ -326,7 +326,11 @@ def main() -> int:
     time.sleep(1.0)
     c.shot(str(out / "09-admin-full-1440.png"))
 
-    errs = c.errors() if hasattr(c, "errors") else []
+    # 滤掉 401 的 console 噪声：浏览器把 `GET /auth/me` 的 401 也记成一条 LOG。
+    # 那是**预期语义**——令牌过期/无效时后端回 401，前端 restore() 据此当未登录，
+    # 不是 JS 异常。真异常（Runtime.exceptionThrown / console.error / 404 资源）照旧判失败。
+    errs = [e for e in (c.errors() if hasattr(c, "errors") else [])
+            if "401" not in e or "UNAUTHORIZED" not in e]
     check(not errs, f"JS 异常 {len(errs)} 条：{errs[:3]}")
 
     print("\n===== 观测值 =====")

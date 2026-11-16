@@ -67,13 +67,14 @@ def main() -> int:
     failures: list[str] = []
     notes: list[str] = []
 
-    # 同一个 user-data-dir 会把上一轮的令牌留着，/login 会立刻跳回工作台。
+    # 同一个 user-data-dir 会把上一轮的令牌留着；R23 起 /login 不再被弹走，
+    # 但要直接拿到登录输入框仍得走 ?open=1（默认是关着的落地页）。
     # 先落到同源页面清掉 localStorage，再验登录页。
     c.goto(f"{base}/")
     c.eval("localStorage.clear(); true")
 
     # ---------- 登录页 ----------
-    c.goto(f"{base}/login")
+    c.goto(f"{base}/login?open=1")
     c.wait_for("!!document.querySelector('input[autocomplete=\"username\"]')", 20)
     login_text = text_of(c)
     for word in BANNED:
@@ -184,7 +185,7 @@ def main() -> int:
 
     # ---------- 换管理员，检查只有 admin 能进的页面 ----------
     c.eval("localStorage.clear(); true")
-    c.goto(f"{base}/login")
+    c.goto(f"{base}/login?open=1")
     c.wait_for("!!document.querySelector('input[autocomplete=\"username\"]')", 20)
     c.eval("""(() => {
       const set = (el, v) => {

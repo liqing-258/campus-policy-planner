@@ -65,7 +65,7 @@ def main() -> int:
     # ---------- 登录 ----------
     c.goto(f"{base}/")
     c.eval("localStorage.clear(); true")
-    c.goto(f"{base}/login")
+    c.goto(f"{base}/login?open=1")
     c.wait_for("!!document.querySelector('input[autocomplete=\"username\"]')", 20)
     c.eval("""(() => {
       const u = document.querySelector('input[autocomplete="username"]');
