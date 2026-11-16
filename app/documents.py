@@ -72,7 +72,12 @@ def _iso(value: datetime | None) -> str | None:
     return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _serialize(doc: Document) -> dict:
+def _serialize(doc: Document, summary: dict | None = None) -> dict:
+    """文档出参。`summary` 是规则准备度（R20），由调用方批量算好传进来。
+
+    为什么不在这里查：列表要出 10–50 条，逐条查规则就是 N+1；
+    `rule_states.summaries_for()` 一次聚合查询就能给出整页的结果。
+    """
     payload = {
         "id": doc.id,
         "title": doc.title,
@@ -90,6 +95,8 @@ def _serialize(doc: Document) -> dict:
         "chunk_count": doc.chunk_count,
         "created_at": _iso(doc.created_at),
         "updated_at": _iso(doc.updated_at),
+        # 资格匹配准备度：五态 + 计数 + 上次抽取结果（详见 app/rule_states.py）
+        "rule_summary": summary,
     }
     # 失败给 parse_error，空文本给 parse_hint —— 同一列，按状态选语义化字段名
     if doc.parse_status == PARSE_FAILED:
@@ -299,7 +306,8 @@ def upload():
         doc.parse_error = f"解析时出现未预期错误：{type(exc).__name__}"
         db.session.commit()
 
-    payload = _serialize(doc)
+    from app.rule_states import summary_of
+    payload = _serialize(doc, summary_of(doc.id))
     # R15：上传完成即提示"是否属于政策更新"。只提示、不自动建联——
     # 未经管理员确认的文件不会被标成现行有效，也不会顶替旧版。
     payload["possible_updates"] = versions.candidates_for(doc.title, exclude_id=doc.id)
@@ -337,14 +345,21 @@ def list_documents():
         .limit(page_size)
     ).scalars().all()
 
-    return ok(paginated([_serialize(d) for d in rows], total, page, page_size))
+    # 整页一次算出规则准备度，避免逐条查规则（N+1）
+    from app.rule_states import summaries_for
+    summaries = summaries_for([d.id for d in rows])
+
+    return ok(paginated(
+        [_serialize(d, summaries.get(d.id)) for d in rows], total, page, page_size
+    ))
 
 
 @bp.get("/documents/<document_id>")
 @login_required
 def get_document(document_id: str):
     doc = _get_active_or_404(document_id)
-    return ok(_serialize(doc))
+    from app.rule_states import summary_of
+    return ok(_serialize(doc, summary_of(doc.id)))
 
 
 @bp.patch("/documents/<document_id>")
@@ -388,7 +403,8 @@ def update_document(document_id: str):
     # 审计日志要的是可追溯，不是副本。
     _audit("document.update", "document", doc.id, json.dumps({"fields": sorted(data)}))
     db.session.commit()
-    return ok(_serialize(doc))
+    from app.rule_states import summary_of
+    return ok(_serialize(doc, summary_of(doc.id)))
 
 
 @bp.get("/documents/version-candidates")
@@ -480,9 +496,11 @@ def version_link(document_id: str):
     _audit("document.version-link", "document", doc.id,
            json.dumps({"supersedes_id": old.id, "new_status": new_status}))
     db.session.commit()
+    from app.rule_states import summaries_for
+    pair = summaries_for([doc.id, old.id])
     return ok({
-        "document": _serialize(doc),
-        "superseded": _serialize(old),
+        "document": _serialize(doc, pair.get(doc.id)),
+        "superseded": _serialize(old, pair.get(old.id)),
     })
 
 
@@ -520,7 +538,8 @@ def reparse_document(document_id: str):
     db.session.commit()
 
     _parse_and_index(doc, settings)
-    return ok(_serialize(doc))
+    from app.rule_states import summary_of
+    return ok(_serialize(doc, summary_of(doc.id)))
 
 
 @bp.get("/documents/<document_id>/chunks")

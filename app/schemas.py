@@ -274,6 +274,24 @@ class RulePatch(StrictModel):
         return _check_in(value, REVIEW_STATUSES, "复核状态")
 
 
+class RuleApplicabilityRequest(StrictModel):
+    """管理员判定「这份政策是否参与资格匹配」（R20）。
+
+    `note` 在标记「不适用」时**必填**（服务层校验，不放这里）：它是给下一个看
+    这份文件的人看的依据，不是给机器读的枚举。理由空着，半年后没人知道
+    当初为什么判定食堂指南不参与资格匹配。
+    """
+
+    applicability: str
+    note: str | None = Field(default=None, max_length=500)
+
+    @field_validator("applicability")
+    @classmethod
+    def _applicability(cls, value):
+        from shared.enums import APPLICABILITIES
+        return _check_in(value, APPLICABILITIES, "适用性标记")
+
+
 class Profile(StrictModel):
     """学生画像。**字段全部可选**：缺字段是正常情况（对应 unknown/missing_info），
 

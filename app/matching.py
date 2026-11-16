@@ -30,6 +30,7 @@ from app.contract import body_json, new_ulid, ok
 from app.documents import _get_active_or_404
 from app.errors import ApiError, Forbidden, RulesNotReady
 from app.models import Document, DocumentChunk, MatchResultItem, MatchSession, PolicyRule, db
+from app import rule_states
 from app import versions
 from app.schemas import MatchRequest, validate
 from shared.codes import DOCUMENT_NOT_FOUND
@@ -47,6 +48,12 @@ from shared.enums import (
     OP_MANUAL_REVIEW,
     OP_NOT_EQUALS,
     REVIEW_APPROVED,
+    RULE_STATE_EXTRACT_FAILED,
+    RULE_STATE_NO_CONDITIONS,
+    RULE_STATE_NOT_APPLICABLE,
+    RULE_STATE_PENDING_EXTRACT,
+    RULE_STATE_PENDING_REVIEW,
+    RULE_STATE_READY,
     UNKNOWN_AMBIGUOUS_RULE,
     UNKNOWN_MISSING_INFO,
     UNKNOWN_NO_EVIDENCE,
@@ -76,6 +83,24 @@ OP_TEXT = {
     OP_CONTAINS_ANY: "包含",
     OP_EXISTS: "应当提供",
 }
+
+# 枚举字段的取值 → 中文。**只用于理由文案**：比较仍用原值，否则规则里的 'yes'
+# 和画像里的 '已认定' 会被判成不相等。
+# 这张表对应前端画像表单的下拉项；表单改了这里也要改，否则理由里会重新露出英文值。
+VALUE_LABELS: dict[str, dict[str, str]] = {
+    "poverty_certified": {"yes": "已认定", "no": "未认定"},
+    "disciplinary_record": {"none": "无处分记录", "any": "有处分记录"},
+    "enrollment_status": {
+        "enrolled": "在籍在读", "suspended": "休学", "graduated": "已毕业",
+    },
+}
+
+
+def _show_value(field_key: str | None, raw) -> str:
+    if raw is None:
+        return ""
+    text = str(raw)
+    return VALUE_LABELS.get(field_key or "", {}).get(text, text)
 
 DISCLAIMER = (
     "匹配结果依据政策原文自动比对得出，仅用于辅助判断，不构成资格认定；"
@@ -173,6 +198,10 @@ def evaluate(rule: PolicyRule, profile: dict) -> dict:
 
     operator = rule.operator
     expected_raw = rule.expected_value
+    # 理由里给人看的取值：枚举字段存的是 yes/no/none，直接印出来是「纪律处分记录为
+    # 「none」，要求等于「none」」——学生看不懂。比较仍用原值，只有文案翻译。
+    user_show = _show_value(rule.field_key, user_raw)
+    expected_show = _show_value(rule.field_key, expected_raw)
 
     if operator == OP_EXISTS:
         return _result(True, user_raw, expected_raw,
@@ -199,7 +228,7 @@ def evaluate(rule: PolicyRule, profile: dict) -> dict:
                 "user_value": _stringify(user_raw),
                 "expected_value": str(expected_raw),
                 "rationale": (
-                    f"{label}「{user_raw}」与阈值「{expected_raw}」无法按数值比较，需人工核实。"
+                    f"{label}「{user_show}」与阈值「{expected_show}」无法按数值比较，需人工核实。"
                 ),
             }
         met = user_num >= expected_num if operator == OP_GTE else user_num <= expected_num
@@ -215,8 +244,8 @@ def evaluate(rule: PolicyRule, profile: dict) -> dict:
         met = _normalize_text(user_raw) in options
         return _result(
             met, user_raw, expected_raw,
-            f"{label}「{user_raw}」在允许取值 {'/'.join(str(o) for o in _as_list(expected_raw))} 内，符合。",
-            f"{label}「{user_raw}」不在允许取值 {'/'.join(str(o) for o in _as_list(expected_raw))} 内，不符合。",
+            f"{label}「{user_show}」在允许取值 {'/'.join(str(o) for o in _as_list(expected_raw))} 内，符合。",
+            f"{label}「{user_show}」不在允许取值 {'/'.join(str(o) for o in _as_list(expected_raw))} 内，不符合。",
         )
 
     if operator == OP_CONTAINS_ANY:
@@ -233,16 +262,16 @@ def evaluate(rule: PolicyRule, profile: dict) -> dict:
         met = _normalize_text(user_raw) != _normalize_text(expected_raw)
         return _result(
             met, user_raw, expected_raw,
-            f"{label}「{user_raw}」不等于「{expected_raw}」，符合。",
-            f"{label}「{user_raw}」等于「{expected_raw}」，不符合。",
+            f"{label}「{user_show}」不等于「{expected_show}」，符合。",
+            f"{label}「{user_show}」等于「{expected_show}」，不符合。",
         )
 
     # equals（默认分支）
     met = _normalize_text(user_raw) == _normalize_text(expected_raw)
     return _result(
         met, user_raw, expected_raw,
-        f"{label}为「{user_raw}」，要求等于「{expected_raw}」，符合。",
-        f"{label}为「{user_raw}」，要求等于「{expected_raw}」，不符合。",
+        f"{label}为「{user_show}」，要求等于「{expected_show}」，符合。",
+        f"{label}为「{user_show}」，要求等于「{expected_show}」，不符合。",
     )
 
 
@@ -273,6 +302,42 @@ def _stringify(value) -> str | None:
 
 
 # ---------------------------------------------------------------- 服务
+def _not_ready_message(summary: dict) -> str:
+    """按五态给出"为什么现在匹配不了"。
+
+    **为什么值得单独写一段文案**
+
+    这四条错误此前只有一句通用话："该文件还没有已复核的可比对规则；请管理员先抽取
+    并复核条件类规则"。学生看不出是自己点错了、还是系统没准备好；
+    管理员也看不出下一步该点抽取还是点复核。同一句 2008，四种处境各有一句人话。
+    """
+    state = summary.get("state")
+    note = (summary.get("applicability_note") or "").strip()
+    if state == RULE_STATE_NOT_APPLICABLE:
+        tail = f"（判定理由：{note}）" if note else ""
+        return (f"该政策已被标记为「不适用于资格匹配」{tail}——"
+                "这类文件里没有可判定的申请条件，请到「校园事务指南」查看办理方式")
+    if state == RULE_STATE_EXTRACT_FAILED:
+        detail = (summary.get("last_attempt_message") or "").strip()
+        tail = f"上次失败原因：{detail[:120]}" if detail else ""
+        return (f"这份政策的资格条件上次抽取失败，暂时无法匹配。{tail}"
+                "管理员可在「规则管理」里重试抽取")
+    if state == RULE_STATE_PENDING_EXTRACT:
+        return ("这份政策还没有抽取过资格条件，暂时无法匹配。"
+                "管理员可在「规则管理」里点「抽取规则」后再试")
+    if state == RULE_STATE_NO_CONDITIONS:
+        return ("已从这份政策里尝试抽取资格条件，但没有得到可判定的条件——"
+                "它可能不涉及申请资格（如服务指南、处分程序）。"
+                "如需参与匹配，请管理员补充或人工录入条件，否则可标记为「不适用于资格匹配」")
+    if state == RULE_STATE_PENDING_REVIEW:
+        return (f"该政策已抽取 {summary.get('total_rules', 0)} 条规则，"
+                f"但其中还没有已复核的资格条件（待复核 {summary.get('pending_review', 0)} 条），"
+                "暂时无法匹配；请管理员在「规则管理」里复核")
+    if state == RULE_STATE_READY:  # 理论上不可达：ready 必然有已复核资格条件
+        return "该文件有已复核条件，但本轮没有取到可判定的条件规则，请刷新后重试"
+    return "该文件还没有已复核的可比对规则；请管理员先抽取并复核条件类规则"
+
+
 def run_match(document_id: str, payload: dict, user) -> dict:
     data = validate(MatchRequest, payload)
     document = _get_active_or_404(document_id)
@@ -286,11 +351,20 @@ def run_match(document_id: str, payload: dict, user) -> dict:
 
     conditions = [r for r in rules if r.rule_type in CONDITION_RULE_TYPES]
     if not conditions:
-        # 返回"0 符合 0 不符合"会让人以为"都不符合"，这里必须说清是规则没准备好
+        # 返回"0 符合 0 不符合"会让人以为"都不符合"，这里必须说清是规则没准备好。
+        # R20 起还要说清**为什么**没准备好：五态里有四种都表现为"0 条"，
+        # 但对用户和管理的下一步完全不同（去抽取 / 去复核 / 重试 / 本来就不适用）。
+        summary = rule_states.summary_of(document.id)
         raise RulesNotReady(
-            "该文件还没有已复核的可比对规则；请管理员先抽取并复核条件类规则",
-            payload={"document_id": document.id, "approved_rules": 0,
-                     "total_rules": len(rules)},
+            _not_ready_message(summary),
+            payload={
+                "document_id": document.id,
+                "approved_rules": len(rules),
+                "total_rules": len(rules),
+                # 五态与计数一起给前端，让"选了一份不能匹配的政策"有可展示的理由
+                "rule_state": summary.get("state"),
+                "rule_summary": summary,
+            },
         )
 
     # ---------- 按奖项过滤（M6，补 M5 登记的缺口）----------

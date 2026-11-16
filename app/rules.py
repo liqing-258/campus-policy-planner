@@ -25,6 +25,7 @@ import re
 from flask import Blueprint, request
 
 from app import llm
+from app import rule_states
 from app.auth import admin_required, current_user, login_required
 from app.contract import body_json, ok, page_args, paginated, new_ulid
 from app.documents import _get_active_or_404
@@ -39,6 +40,8 @@ from app.models import DocumentChunk, PolicyRule, db
 from app.runtime import current_settings
 from app.schemas import ExtractRequest, RuleExtractionPayload, RulePatch, validate
 from shared.enums import (
+    ATTEMPT_FAILED,
+    ATTEMPT_SUCCEEDED,
     CONDITION_RULE_TYPES,
     EXTRACT_SUGGESTED,
     EXTRACT_VERIFIED,
@@ -52,6 +55,14 @@ from shared.enums import (
 )
 
 bp = Blueprint("rules", __name__)
+
+# 抽取是"一次吐 8–30 条结构化 JSON"的长输出任务，推理模型还会先写一大段 reasoning。
+# 2026-11-16 实测（R20）：《国家助学贷款与勤工助学管理办法》8 片段一次抽取，
+# 6000 预算下 reasoning 恰好吃满 6000、content 为空 → 4002；提到 12000 后
+# reasoning 3213、正常产出 20 条。**同一个提示词，只差预算。**
+# 所以抽取的基线预算必须比问答高一个档，且失败时还有一次升档机会。
+EXTRACT_BUDGET = 12000
+EXTRACT_BUDGET_MAX = 16000
 
 SYSTEM_PROMPT = """你是高校学生事务政策的结构化抽取器。
 
@@ -86,6 +97,22 @@ SYSTEM_PROMPT = """你是高校学生事务政策的结构化抽取器。
 可用的 field_key（**只能**用这些，其它一律不要抽）：
 student_type, grade, gpa, rank_percent, disciplinary_record,
 poverty_certified, major, credits_earned, enrollment_status
+
+expected_value 的取值约定（**必须落在取值域内**，否则这条规则判定时会对不上，白抽）：
+- student_type: 全日制在校本科生 | 全日制在校专科生 | 全日制在校硕士研究生 |
+  全日制在校博士研究生 | 非全日制研究生 | 交换生 | 旁听生
+- grade: 整数 1–8（专科 1–3，本科 1–4）
+- gpa: 0–5 的数值
+- rank_percent: 0–100 的数值（越小越靠前）
+- poverty_certified: yes（已认定） | no（未认定）
+- disciplinary_record: none（无处分） | any（有处分）
+- enrollment_status: enrolled（在籍在读） | suspended（休学） | graduated（已毕业）
+- credits_earned: 0–300 的整数
+- major: 专业名称原文
+
+如果原文的表述**塞不进**上面的取值域（例如"纳入国家普通本科招生计划录取的应届毕业生"
+"表现突出、综合评定优秀"），就把 operator 填 manual_review、expected_value 留 null，
+不要硬造一个对不上的值——错值会让学生被判成"不符合"，比不判更糟。
 """
 
 
@@ -177,6 +204,41 @@ def _validate_candidates(candidates, chunks: list[DocumentChunk], limit: int):
 
 
 # ---------------------------------------------------------------- 服务
+def _extract_with_escalation(document_id: str, chunks: list[DocumentChunk],
+                            per_chunk: int) -> tuple[dict, object]:
+    """调模型抽取，预算不够时**升一档重试一次**，并记录这次尝试的结果。
+
+    为什么不是无条件给 16000：绝大多数政策 12000 就够（实测 20 条规则只用了 3213
+    reasoning），只有超长文件才会撞墙。固定给大预算等于让每次抽取都多付一份钱。
+
+    为什么只对 `budget_exhausted` 升档：JSON 语法错、字段缺失重试同一预算就行，
+    加预算不会让模型更会写 JSON——那类重试已经由 `llm.chat_json` 自己做完了。
+    """
+    prompt = build_user_prompt(chunks, per_chunk)
+    budget = max(current_settings().llm_max_tokens, EXTRACT_BUDGET)
+
+    while True:
+        try:
+            parsed, result = llm.chat_json(SYSTEM_PROMPT, prompt, max_tokens=budget)
+        except LlmOutputInvalid as exc:
+            # budget_exhausted 是结构化标记，不靠匹配中文报错文案（文案会改）
+            if getattr(exc, "budget_exhausted", False) and budget < EXTRACT_BUDGET_MAX:
+                budget = EXTRACT_BUDGET_MAX
+                continue
+            rule_states.record_attempt(
+                document_id, status=ATTEMPT_FAILED,
+                message=f"抽取失败（max_tokens={budget}）：{exc}",
+            )
+            raise
+        except Exception as exc:  # 超时 / 上游 5xx / 降级等
+            rule_states.record_attempt(
+                document_id, status=ATTEMPT_FAILED,
+                message=f"抽取失败（max_tokens={budget}）：{type(exc).__name__}: {exc}",
+            )
+            raise
+        return parsed, result
+
+
 def extract(document_id: str, payload: dict) -> dict:
     data = validate(ExtractRequest, payload)
     document = _get_active_or_404(document_id)
@@ -200,14 +262,9 @@ def extract(document_id: str, payload: dict) -> dict:
         )
 
     # 抽取是长输出任务：一次要吐 8–30 条规则，而推理模型会先把 reasoning 写进
-    # 同一个 max_tokens 预算。2026-11-10 实测：奖学金办法（4 片段）在默认 2500 下
-    # reasoning_tokens=2500、content 为空，直接 4002；事务指南（6 片段）7.2 秒就过了。
-    # 所以抽取单独要一份更大的预算，而不是把全局 LLM_MAX_TOKENS 一直调大——
-    # 问答场景 2500 是合适的，全局调大会让每次问答都为长输出付费。
-    parsed, result = llm.chat_json(
-        SYSTEM_PROMPT, build_user_prompt(chunks, data.max_rules_per_chunk),
-        max_tokens=max(current_settings().llm_max_tokens, 6000),
-    )
+    # 同一个 max_tokens 预算。详见文件头 EXTRACT_BUDGET 的实测记录。
+    # 失败也记一次尝试：不记的话，"抽取失败"和"从没抽过"在界面上完全一样（R20 的现场）。
+    parsed, result = _extract_with_escalation(document.id, chunks, data.max_rules_per_chunk)
     try:
         extraction = RuleExtractionPayload.model_validate(parsed)
     except Exception as exc:
@@ -258,6 +315,18 @@ def extract(document_id: str, payload: dict) -> dict:
         stored.append(rule)
 
     db.session.commit()
+
+    # 成功也要记：否则"抽过但 0 条"会被当成"从没抽过"，管理员会反复点同一个按钮。
+    # 0 条时给出可执行的下一步（标记不适用），而不是丢一个中性的"成功"。
+    if stored:
+        message = (f"抽取成功：新增 {len(stored)} 条待复核规则"
+                   f"（模型给出 {len(extraction.rules)} 条，丢弃 {len(dropped)} 条）")
+    else:
+        message = ("抽取完成但未得到可用规则：该文件可能不含申请资格条件，"
+                   "可考虑标记为「不适用于资格匹配」")
+    rule_states.record_attempt(
+        document.id, status=ATTEMPT_SUCCEEDED, message=message, rules=len(stored)
+    )
 
     return {
         "document_id": document.id,
@@ -376,3 +445,15 @@ def list_rules(document_id: str):
 @admin_required
 def patch_rule(rule_id: str):
     return ok(update_rule(rule_id, body_json()))
+
+
+@bp.patch("/documents/<document_id>/rule-applicability")
+@admin_required
+def patch_rule_applicability(document_id: str):
+    """标记「这份政策是否参与资格匹配」。
+
+    与 `PATCH /rules/{id}` 的分工：那条管"这一条条件怎么判"，
+    这条管"这份文件要不要参与资格判断"。食堂指南、违纪处分办法这类文件
+    本来就没有申请资格条件，需要的是一个明确的否定结论，而不是 0 条规则。
+    """
+    return ok(rule_states.set_applicability(document_id, body_json(), current_user()))
