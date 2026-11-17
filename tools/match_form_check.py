@@ -13,7 +13,9 @@ Vue 会把值转成 number 写回，接着 `.replace()` / `.trim()` 抛 TypeErro
    「第 5 年」是不存在的值）；绩点/学分不夹取，原样保留 + 红字 + 禁用提交
 5. 改成合法值：提示消失、按钮恢复可点
 6. 失焦只统一写法（`007` → `7`），不改数值
-7. 全程零 JS 异常
+7. 闭环走一遍：开始匹配 →「生成计划草稿」→「确认并写入任务中心」（草稿任务真的落库，
+   结束后按 id 精确删除）——这一段是演示第 5 步的地面真值
+8. 全程零 JS 异常
 
 用法：
     python tools/match_form_check.py --out .workbuddy/shots/matchform
@@ -210,6 +212,74 @@ def main() -> int:
     type_into("年级", "007", blur=True)
     normalized = c.eval(field_js("年级"))
     check("失焦把 007 归一成 7", normalized == "7", f"值={normalized!r}")
+
+    # ---------- 7. 闭环：开始匹配 → 生成草稿 → 确认写入任务中心（R24 补） ----------
+    #
+    # 为什么补这一段：演示第 5 步要在评委面前点这条路径，而此前**没有任何脚本走过它**。
+    # `regression_check.py` 只在接口层验过 draft → confirm，验不到"前端把草稿里的 tasks
+    # 原样回传"这个形态；`演示视频脚本` 里写的按钮名也正是这一段的地面真值。
+    import sqlite3
+
+    db_path = ROOT / "data" / "app.db"
+    plans_before: set[str] = set()
+    if db_path.exists():
+        with sqlite3.connect(str(db_path)) as con:
+            plans_before = {row[0] for row in con.execute("select id from action_plans")}
+
+    # 选 2026 版奖学金：只有它的已复核条件里带材料/截止时间，草稿才会长出击任务
+    picked = c.eval("""(() => {
+      const policy = document.querySelectorAll('select.select')[0];
+      if (!policy) return null;
+      const opt = Array.from(policy.options).find(o => o.textContent.includes('2026'));
+      if (!opt) return 'no-2026';
+      policy.value = opt.value;
+      policy.dispatchEvent(new Event('change', {bubbles: true}));
+      return opt.textContent.trim();
+    })()""")
+    check("政策下拉里选到 2026 版", bool(picked) and picked != "no-2026", str(picked))
+    time.sleep(0.9)
+
+    c.eval("""(() => {
+      const btn = Array.from(document.querySelectorAll('button.btn'))
+        .find(b => b.textContent.trim() === '开始匹配');
+      if (btn) btn.click();
+      return true;
+    })()""")
+    check("开始匹配后出现三态计数",
+          c.wait_for("!!document.querySelector('.counts .count')", 60))
+
+    c.eval("""(() => {
+      const btn = Array.from(document.querySelectorAll('button.btn'))
+        .find(b => b.textContent.trim() === '生成计划草稿');
+      if (btn) btn.click();
+      return true;
+    })()""")
+    drafted = c.wait_for("!!document.querySelector('.draft-tasks')", 90)
+    n_tasks = c.eval("document.querySelectorAll('.draft-tasks li').length")
+    check("「生成计划草稿」点得动且列出任务", drafted and int(n_tasks or 0) > 0, f"{n_tasks} 条")
+
+    c.eval("""(() => {
+      const btn = Array.from(document.querySelectorAll('button.btn'))
+        .find(b => b.textContent.includes('确认并写入任务中心'));
+      if (btn) btn.click();
+      return true;
+    })()""")
+    confirmed = c.wait_for("/计划已确认/.test(document.body.innerText)", 60)
+    check("「确认并写入任务中心」后给出成功提示", confirmed, "")
+
+    # 只删本次新建的计划（提交前记了 id 集合），并连带删它们的任务
+    if db_path.exists():
+        with sqlite3.connect(str(db_path)) as con:
+            new_plans = {row[0] for row in con.execute("select id from action_plans")} - plans_before
+            n_tasks_db = 0
+            for plan_id in new_plans:
+                n_tasks_db += con.execute("select count(*) from tasks where plan_id = ?",
+                                          (plan_id,)).fetchone()[0]
+                con.execute("delete from tasks where plan_id = ?", (plan_id,))
+                con.execute("delete from action_plans where id = ?", (plan_id,))
+            con.commit()
+        check("闭环真的写进了库（任务数 > 0 后被清理）", n_tasks_db > 0,
+              f"新建计划 {len(new_plans)} 个 / 任务 {n_tasks_db} 条，已按 id 删除")
 
     errs = c.errors()
     check("全程无 JS 异常", not errs, "；".join(errs)[:200])
